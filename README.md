@@ -2,7 +2,7 @@
 
 A backend system built with **NestJS** and **TypeScript** for business owners to register their business, manage their customers, and (eventually) track invoices and financial activity — all backed by a cloud PostgreSQL database (**Neon**).
 
-> ⚠️ **Status: Work in Progress.** Auth, business registration, customer registration, and business–customer linking are implemented. Invoicing and financial-activity tracking are actively being built out.
+
 
 ---
 
