@@ -6,6 +6,7 @@ import {
   Min,
   IsOptional,
   IsArray,
+  IsUUID,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -28,27 +29,17 @@ export class CreateInvoiceItemDto {
 
 export class CreateInvoiceDto {
   @IsNotEmpty()
-  @IsInt()
-  business_id: number;
+  @IsUUID()
+  customer_id: string;
 
-  @IsNotEmpty()
-  @IsInt()
-  customer_id: number;
-
-  @IsNotEmpty()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  total_amount: number;
-
-  @IsOptional() // Optional if they haven't made a down payment yet
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   paid_amount: number;
 
   @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  due_amount: number;
+  @IsString()
+  notes: string;
 
   // This links the items array to the invoice structure
   @IsNotEmpty()

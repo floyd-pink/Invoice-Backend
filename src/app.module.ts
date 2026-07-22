@@ -42,7 +42,7 @@ import { BusinessCustomerModule } from './business-customer/business-customer.mo
     CustomersModule,
     BusinessCustomerModule,
   ],
-  controllers: [AppController, InvoiceItemsController],
-  providers: [AppService, InvoiceItemsService],
+  controllers: [AppController],
+  providers: [AppService],
 })
 export class AppModule {}
