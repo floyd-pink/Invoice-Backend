@@ -11,6 +11,7 @@ import { AuthModule } from './auth/auth.module';
 import { BusinessModule } from './bussiness/bussiness.module';
 import { CustomersModule } from './customers/customers.module';
 import { BusinessCustomerModule } from './business-customer/business-customer.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { BusinessCustomerModule } from './business-customer/business-customer.mo
     BusinessModule,
     CustomersModule,
     BusinessCustomerModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
