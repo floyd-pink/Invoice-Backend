@@ -13,7 +13,8 @@ import {
 import { BusinessEntity } from 'src/bussiness/entities/bussiness.entity';
 import { Customer } from 'src/customers/entities/customer.entity';
 import { InvoiceItemsEntity } from './invoiceItems.entity';
-import { InvoicePaymentsEntity } from './invoicePayments.entity';
+import { InvoicePaymentsEntity } from '../../payments/entities/invoicePayments.entity';
+import { DecimalTransformer } from 'src/common/transformers/decimal.transformer';
 export enum InvoiceStatus {
   DRAFT = 'DRAFT',
   SENT = 'SENT',
@@ -52,6 +53,7 @@ export class InvoiceEntity {
     precision: 12,
     scale: 2,
     default: 0.0,
+    transformer: new DecimalTransformer(),
   })
   totalAmount: number;
 
@@ -61,6 +63,7 @@ export class InvoiceEntity {
     precision: 12,
     scale: 2,
     default: 0.0,
+     transformer: new DecimalTransformer(),
   })
   paidAmount: number;
 
@@ -70,6 +73,7 @@ export class InvoiceEntity {
     precision: 12,
     scale: 2,
     default: 0.0,
+     transformer: new DecimalTransformer(),
   })
   dueAmount: number;
 
