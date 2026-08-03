@@ -37,6 +37,13 @@ export class CreateInvoiceDto {
   @Min(0)
   paid_amount: number;
 
+  @IsNotEmpty()
+  @IsString()
+  payment_method: string;
+
+  @IsOptional()
+  @IsString()
+  payment_reference: string;
   @IsOptional()
   @IsString()
   notes: string;

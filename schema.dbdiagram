@@ -1,0 +1,163 @@
+{
+  "version": "2.0.0",
+  "darkMode": true,
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "tablePositions": [
+      {
+        "name": "users",
+        "schemaName": "public",
+        "x": 880,
+        "y": 384
+      },
+      {
+        "name": "business",
+        "schemaName": "public",
+        "x": 408,
+        "y": 368
+      },
+      {
+        "name": "customers",
+        "schemaName": "public",
+        "x": 1192,
+        "y": 608
+      },
+      {
+        "name": "business_customer",
+        "schemaName": "public",
+        "x": 1048,
+        "y": 152
+      },
+      {
+        "name": "invoices",
+        "schemaName": "public",
+        "x": 624,
+        "y": 720
+      },
+      {
+        "name": "invoice_items",
+        "schemaName": "public",
+        "x": 720,
+        "y": 48
+      },
+      {
+        "name": "invoice_payments",
+        "schemaName": "public",
+        "x": 48,
+        "y": 768
+      }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": [
+      {
+        "firstFieldNames": [
+          "business_owner_id"
+        ],
+        "firstTableName": "business",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "users",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "business_id"
+        ],
+        "firstTableName": "business_customer",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "business_id"
+        ],
+        "secondTableName": "business",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "customer_id"
+        ],
+        "firstTableName": "business_customer",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "customer_id"
+        ],
+        "secondTableName": "customers",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "business_id"
+        ],
+        "firstTableName": "invoices",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "business_id"
+        ],
+        "secondTableName": "business",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "customer_id"
+        ],
+        "firstTableName": "invoices",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "customer_id"
+        ],
+        "secondTableName": "customers",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "invoice_id"
+        ],
+        "firstTableName": "invoice_items",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "invoices",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "invoice_id"
+        ],
+        "firstTableName": "invoice_payments",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "invoices",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      }
+    ]
+  },
+  "views": {}
+}

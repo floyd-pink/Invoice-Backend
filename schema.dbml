@@ -1,0 +1,212 @@
+// Database Schema - Invoicing & Business Finance Tracker
+// Production-Oriented Design
+// https://dbdiagram.io
+
+// ============================================
+// ENUMS
+// ============================================
+
+Enum UserRole {
+  admin
+  user
+  merchant
+  staff
+}
+
+Enum InvoiceStatus {
+  DRAFT
+  SENT
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+Enum PaymentMethod {
+  CASH
+  CARD
+  ESEWA
+  IMEPAY
+  KHALTI
+  BANK_TRANSFER
+}
+
+// ============================================
+// USERS
+// ============================================
+
+Table users {
+  id int [pk, increment]
+
+  name varchar
+  email varchar [unique]
+  phone varchar(20) [unique]
+  password_hash varchar
+
+  role UserRole [default: 'user']
+  is_active boolean [default: true]
+
+  created_at timestamp
+  updated_at timestamp
+}
+
+// ============================================
+// BUSINESS
+// ============================================
+
+Table business {
+  business_id uuid [pk]
+
+  business_name varchar
+  pan_number varchar [unique]
+
+  business_wallet_balance decimal(12,2) [default: 0]
+
+  business_owner_id int
+
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    business_owner_id
+  }
+}
+
+// ============================================
+// CUSTOMERS
+// ============================================
+
+Table customers {
+  customer_id uuid [pk]
+
+  customer_name varchar
+
+  customer_phone varchar(20) [unique]
+  customer_email varchar [unique, null]
+
+  created_at timestamp
+  updated_at timestamp
+}
+
+// ============================================
+// BUSINESS <-> CUSTOMER
+// ============================================
+
+Table business_customer {
+  id uuid [pk]
+
+  business_id uuid
+  customer_id uuid
+
+  associated_at timestamp
+
+  indexes {
+    business_id
+    customer_id
+
+    (business_id, customer_id) [unique]
+  }
+}
+
+// ============================================
+// INVOICES
+// ============================================
+
+Table invoices {
+  id uuid [pk]
+
+  invoice_number varchar(50)
+
+  business_id uuid
+  customer_id uuid
+
+  status InvoiceStatus [default: 'DRAFT']
+
+  total_amount decimal(12,2) [default: 0]
+  paid_amount decimal(12,2) [default: 0]
+  due_amount decimal(12,2) [default: 0]
+
+  invoice_date date [default: `CURRENT_DATE`]
+  due_date date
+
+  notes text [null]
+
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    business_id
+    customer_id
+
+    (business_id, invoice_number) [unique]
+  }
+}
+
+// ============================================
+// INVOICE ITEMS
+// ============================================
+
+Table invoice_items {
+  id uuid [pk]
+
+  invoice_id uuid
+
+  item_name varchar
+
+  item_quantity int
+
+  unit_price decimal(12,2)
+
+  total_price decimal(12,2)
+
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    invoice_id
+  }
+}
+
+// ============================================
+// PAYMENTS
+// ============================================
+
+Table invoice_payments {
+  id uuid [pk]
+
+  payment_id varchar(30) [unique]
+
+  invoice_id uuid
+
+  amount_paid decimal(12,2)
+
+  payment_method PaymentMethod
+
+  payment_reference varchar(255) [null]
+
+  payment_date timestamp
+
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    invoice_id
+  }
+}
+
+// ============================================
+// RELATIONSHIPS
+// ============================================
+
+Ref: business.business_owner_id > users.id [delete: restrict]
+
+Ref: business_customer.business_id > business.business_id [delete: cascade]
+Ref: business_customer.customer_id > customers.customer_id [delete: cascade]
+
+Ref: invoices.business_id > business.business_id [delete: restrict]
+Ref: invoices.customer_id > customers.customer_id [delete: restrict]
+
+Ref: invoice_items.invoice_id > invoices.id [delete: cascade]
+
+Ref: invoice_payments.invoice_id > invoices.id [delete: cascade]
