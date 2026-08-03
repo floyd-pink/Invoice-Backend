@@ -6,7 +6,8 @@ import { BusinessEntity } from 'src/bussiness/entities/bussiness.entity';
 import { BusinessCustomer } from 'src/business-customer/entities/business-customer.entity';
 import { InvoiceEntity } from './entities/invoice.entity';
 import { InvoiceItemsEntity } from './entities/invoiceItems.entity';
-import { InvoicePaymentsEntity } from './entities/invoicePayments.entity';
+import { InvoicePaymentsEntity } from '../payments/entities/invoicePayments.entity';
+import { InvoiceCalculationService } from './services/invoice-calculation.service';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -18,7 +19,7 @@ import { InvoicePaymentsEntity } from './entities/invoicePayments.entity';
     ]),
   ],
   controllers: [InvoiceItemsController],
-  providers: [InvoiceItemsService],
-  exports: [InvoiceItemsService],
+  providers: [InvoiceItemsService, InvoiceCalculationService],
+  exports: [InvoiceItemsService, InvoiceCalculationService],
 })
 export class InvoiceItemsModule {}
