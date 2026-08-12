@@ -1,4 +1,4 @@
-import { Entity,OneToMany } from 'typeorm';
+import { Entity, OneToMany } from 'typeorm';
 import { Column, PrimaryGeneratedColumn } from 'typeorm';
 import { PlanBillingCycle, PlanStatus, PlanType } from '../enum/plan-type.enum';
 import { PlanFeatureEntity } from './plan-feature.entity';
@@ -17,7 +17,7 @@ export class PlanEntity {
   name: string;
 
   @Column({ type: 'boolean', default: true })
-  isActive: PlanStatus;
+  isActive: boolean;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0.0 })
   price: number;
