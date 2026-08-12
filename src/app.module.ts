@@ -12,6 +12,7 @@ import { BusinessModule } from './bussiness/bussiness.module';
 import { CustomersModule } from './customers/customers.module';
 import { BusinessCustomerModule } from './business-customer/business-customer.module';
 import { PaymentsModule } from './payments/payments.module';
+import { PlansModule } from './plans/plans.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { PaymentsModule } from './payments/payments.module';
     CustomersModule,
     BusinessCustomerModule,
     PaymentsModule,
+    PlansModule,
   ],
   controllers: [AppController],
   providers: [AppService],
