@@ -3,13 +3,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BusinessEntity } from './entities/bussiness.entity';
 import type { CreateBusinessDto } from './dto/bussiness.dto';
-import type { UserEntity } from 'src/auth/entities/auth.entity';
+import { UserEntity } from 'src/auth/entities/auth.entity';
 
 @Injectable()
 export class BusinessService {
   constructor(
     @InjectRepository(BusinessEntity)
     private readonly businessRepository: Repository<BusinessEntity>,
+    @InjectRepository(UserEntity)
+    private readonly userRepository: Repository<UserEntity>,
   ) {}
 
   async createBusiness(payload: CreateBusinessDto, userId: string) {
@@ -29,6 +31,7 @@ export class BusinessService {
 
       const savedBusiness = await this.businessRepository.save(business);
 
+      await this.userRepository.update(userId, { role: 'admin' });
       return {
         business_id: savedBusiness.business_id,
         Business_Name: savedBusiness.business_name,

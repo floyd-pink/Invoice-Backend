@@ -11,7 +11,7 @@ import { Repository } from 'typeorm';
 import { UserEntity } from './entities/auth.entity';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 @Injectable()
 export class AuthService {
   constructor(
@@ -63,6 +63,7 @@ export class AuthService {
         'User associated with the email does not exist',
       );
     }
+
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid password');
