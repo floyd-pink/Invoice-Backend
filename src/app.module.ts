@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
+import { AppService } from './app.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AppService } from './app.service';
 import { ContactModule } from './contact/contact.module';
 import { InvoiceItemsModule } from './invoice_items/invoice_items.module';
 import { InvoiceItemsService } from './invoice_items/invoice_items.service';
@@ -13,6 +14,9 @@ import { CustomersModule } from './customers/customers.module';
 import { BusinessCustomerModule } from './business-customer/business-customer.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PlansModule } from './plans/plans.module';
+import { GuardsModule } from './common/guards/guards.module';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { RolesGuard } from './common/guards/roles.guard';
 
 @Module({
   imports: [
@@ -45,8 +49,19 @@ import { PlansModule } from './plans/plans.module';
     BusinessCustomerModule,
     PaymentsModule,
     PlansModule,
+    GuardsModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard, //making JwtAuthGuard global for all routes, no need to use in every controller
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
+    },
+  ],
 })
 export class AppModule {}

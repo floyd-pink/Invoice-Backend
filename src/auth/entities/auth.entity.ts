@@ -9,7 +9,7 @@ import {
   BeforeUpdate,
   OneToMany,
 } from 'typeorm';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { BusinessEntity } from 'src/bussiness/entities/bussiness.entity';
 export type UserRole = 'admin' | 'user' | 'merchant' | 'staff';
 

@@ -1,40 +1,49 @@
-import { JwtService } from '@nestjs/jwt';
-import { Injectable } from '@nestjs/common';
 import {
+  Injectable,
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly JwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly reflector: Reflector,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    if (isPublic) {
+      return true;
+    }
+
     const request = context.switchToHttp().getRequest<Request>();
     const authHeader = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       throw new UnauthorizedException(
-        'Session Expired or Invalid Token,Please login Again ',
+        'Session expired or invalid token. Please log in again.',
       );
     }
-    const token = authHeader.split(' ')[1];
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      const payload = await this.JwtService.verifyAsync(token, {
-        secret: 'Hahsh-jaewuhjhda[jdas', // 🔒 FORCE THE EXACT SAME STRING
-      });
 
-      (request as any).user = payload;
+    const token = authHeader.split(' ')[1];
+
+    try {
+      // No secret option — uses whatever JwtModule was configured with
+      const payload = await this.jwtService.verifyAsync(token);
+      request['user'] = payload;
       return true;
     } catch (error) {
-      console.log('--- ACTUAL CRYPTOGRAPHIC ERROR BELOW ---');
-      console.error(error);
-      console.log('----------------------------------------');
-
-      throw new UnauthorizedException('Invalid Token'); // 👈 This keeps TypeScript happy!
+      throw new UnauthorizedException('Invalid or expired token');
     }
   }
 }
