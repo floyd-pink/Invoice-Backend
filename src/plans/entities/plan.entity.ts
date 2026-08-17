@@ -1,8 +1,9 @@
-import { Entity, OneToMany } from 'typeorm';
+import { Entity, Index, OneToMany } from 'typeorm';
 import { Column, PrimaryGeneratedColumn } from 'typeorm';
 import { PlanBillingCycle, PlanStatus, PlanType } from '../enum/plan-type.enum';
 import { PlanFeatureEntity } from './plan-feature.entity';
 @Entity('plans')
+@Index('IDX_PLAN_TYPE_ACTIVE', ['type', 'isActive'])
 export class PlanEntity {
   @PrimaryGeneratedColumn()
   id: number;
