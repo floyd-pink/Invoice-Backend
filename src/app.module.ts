@@ -17,6 +17,8 @@ import { PlansModule } from './plans/plans.module';
 import { GuardsModule } from './common/guards/guards.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { BusinessSubscriptionModule } from './business-subscription/business-subscription.module';
+import { RedisModule } from './common/redis/redis.module';
 
 @Module({
   imports: [
@@ -36,7 +38,9 @@ import { RolesGuard } from './common/guards/roles.guard';
         },
         extra: {
           max: 10,
-          connectionTimeoutMillis: 10000,
+          connectionTimeoutMillis: 60000,
+          retryAttempts: 3,
+          retryDelay: 5000,
         },
         synchronize: true,
       }),
@@ -50,6 +54,8 @@ import { RolesGuard } from './common/guards/roles.guard';
     PaymentsModule,
     PlansModule,
     GuardsModule,
+    BusinessSubscriptionModule,
+    RedisModule,
   ],
   controllers: [AppController],
   providers: [

@@ -2,9 +2,8 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
-  JoinTable,
-  ManyToMany,
   ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
@@ -20,6 +19,7 @@ export class BusinessEntity {
   business_name: string;
 
   @Column({ name: 'pan_number' })
+  @Index('IDX_BUSINESS_PAN', { unique: true })
   panNumber: string;
 
   @Column({
@@ -35,6 +35,7 @@ export class BusinessEntity {
   createdAt: Date;
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
+  
   @ManyToOne(() => UserEntity, (user) => user.businesses, {
     onDelete: 'CASCADE',
   })
