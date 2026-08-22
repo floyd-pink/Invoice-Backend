@@ -10,6 +10,8 @@ import type { Repository } from 'typeorm';
 import { BusinessEntity } from 'src/bussiness/entities/bussiness.entity';
 import { RegisterCustomerDto } from './dto/customers.dto';
 import { BusinessCustomer } from 'src/business-customer/entities/business-customer.entity';
+import { PlanEnforcementService } from 'src/plans/plan-enforcement.service';
+import { PlanFeature } from 'src/plans/enum/plan-feature.enum';
 @Injectable()
 export class CustomersService {
   constructor(
@@ -19,6 +21,7 @@ export class CustomersService {
     private readonly businessRepository: Repository<BusinessEntity>,
     @InjectRepository(BusinessCustomer)
     private readonly businessCustomerRepository: Repository<BusinessCustomer>,
+    private readonly planEnforcementService: PlanEnforcementService,
   ) {}
 
   async registerCustomer(
@@ -42,6 +45,11 @@ export class CustomersService {
         'You dont have permission to add customer to this Business',
       );
     }
+    await this.planEnforcementService.checkPlanLimit(
+      businessId,
+      PlanFeature.Create_Customer,
+    );
+
     const phoneMatch = await this.customerRepository.findOne({
       where: { customer_phone: payload.customer_phone },
     });

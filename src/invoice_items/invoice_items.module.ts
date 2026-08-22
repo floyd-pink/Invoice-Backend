@@ -8,6 +8,8 @@ import { InvoiceEntity } from './entities/invoice.entity';
 import { InvoiceItemsEntity } from './entities/invoiceItems.entity';
 import { InvoicePaymentsEntity } from '../payments/entities/invoicePayments.entity';
 import { InvoiceCalculationService } from './services/invoice-calculation.service';
+import { PlansModule } from 'src/plans/plans.module';
+import { PlanEnforcementModule } from 'src/plans/plan-enforcement.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -17,6 +19,8 @@ import { InvoiceCalculationService } from './services/invoice-calculation.servic
       InvoiceItemsEntity,
       InvoicePaymentsEntity,
     ]),
+    PlansModule,
+    PlanEnforcementModule,
   ],
   controllers: [InvoiceItemsController],
   providers: [InvoiceItemsService, InvoiceCalculationService],

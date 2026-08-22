@@ -29,6 +29,7 @@ export enum InvoiceStatus {
 @Index('UQ_BUSINESS_INVOICE_NUMBER', ['businessId', 'invoiceNumber'], {
   unique: true,
 })
+@Index('IDX_INVOICE_BUSINESS_CREATED', ['businessId', 'createdAt'])
 export class InvoiceEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -63,7 +64,7 @@ export class InvoiceEntity {
     precision: 12,
     scale: 2,
     default: 0.0,
-     transformer: new DecimalTransformer(),
+    transformer: new DecimalTransformer(),
   })
   paidAmount: number;
 
@@ -73,7 +74,7 @@ export class InvoiceEntity {
     precision: 12,
     scale: 2,
     default: 0.0,
-     transformer: new DecimalTransformer(),
+    transformer: new DecimalTransformer(),
   })
   dueAmount: number;
 
