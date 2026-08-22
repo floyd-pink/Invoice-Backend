@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   JoinTable,
   ManyToOne,
@@ -12,6 +13,7 @@ import { BusinessEntity } from 'src/bussiness/entities/bussiness.entity';
 import { Customer } from 'src/customers/entities/customer.entity';
 @Entity('business_customer')
 @Unique(['business', 'customer'])
+@Index('IDX_BUSINESS_CUSTOMER', ['businessId', 'associatedAt'])
 export class BusinessCustomer {
   @PrimaryGeneratedColumn('uuid')
   id: string;

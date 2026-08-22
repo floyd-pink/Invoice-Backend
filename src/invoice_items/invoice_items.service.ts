@@ -14,6 +14,8 @@ import { InvoiceItemsEntity } from './entities/invoiceItems.entity';
 import { InvoicePaymentsEntity } from 'src/payments/entities/invoicePayments.entity';
 import { InvoiceCalculationService } from './services/invoice-calculation.service';
 import { PaymentMethod } from 'src/payments/entities/invoicePayments.entity';
+import { PlanEnforcementService } from 'src/plans/plan-enforcement.service';
+import { PlanFeature } from 'src/plans/enum/plan-feature.enum';
 @Injectable()
 export class InvoiceItemsService {
   constructor(
@@ -26,6 +28,8 @@ export class InvoiceItemsService {
     private readonly dataSource: DataSource,
 
     private readonly invoiceCalculationService: InvoiceCalculationService,
+
+    private readonly planEnforcementService: PlanEnforcementService,
   ) {}
 
   async createInvoice(
@@ -51,6 +55,12 @@ export class InvoiceItemsService {
         'You are not allowed to create invoice for this business',
       );
     }
+
+    await this.planEnforcementService.checkPlanLimit(
+      businessId,
+      PlanFeature.Create_Invoice,
+    );
+
     const businessCustomer = await this.businessCustomerRepository.findOne({
       where: {
         businessId,

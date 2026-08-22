@@ -5,6 +5,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -19,6 +20,7 @@ export enum SubscriptionStatus {
 }
 
 @Entity('business_subscription')
+@Index('IDX_SUBSCRIBTION_BUSINESS_STATUS', ['businessId', 'status'])
 export class BusinessSubscriptionEntity {
   @PrimaryGeneratedColumn()
   subscriptionId: number;
