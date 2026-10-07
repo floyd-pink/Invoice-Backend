@@ -12,6 +12,7 @@ import { InvoiceEntity } from 'src/invoice_items/entities/invoice.entity';
 import { BusinessCustomer } from 'src/business-customer/entities/business-customer.entity';
 
 import { LimitPeriod, PlanFeature } from './enum/plan-feature.enum';
+import { QuickSalesEntity } from 'src/quick-sales/entities/quickSales.entity';
 
 @Injectable()
 export class PlanEnforcementService {
@@ -25,6 +26,8 @@ export class PlanEnforcementService {
     @InjectRepository(BusinessCustomer)
     private readonly businessCustomerRepository: Repository<BusinessCustomer>,
 
+    @InjectRepository(QuickSalesEntity)
+    private readonly quickSalesRepository: Repository<QuickSalesEntity>,
     private readonly redisService: RedisService,
   ) {}
 
@@ -124,6 +127,13 @@ export class PlanEnforcementService {
             ...(startDate ? { associatedAt: MoreThanOrEqual(startDate) } : {}),
           },
         });
+      case PlanFeature.Create_Quick_Sale:
+        return this.quickSalesRepository.count({
+          where: {
+            businessId,
+            ...(startDate ? { createdAt: MoreThanOrEqual(startDate) } : {}),
+          },
+        });
 
       default:
         return 0;
@@ -134,6 +144,8 @@ export class PlanEnforcementService {
     const now = new Date();
 
     switch (period) {
+      case LimitPeriod.DAILY:
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate());
       case LimitPeriod.MONTHLY:
         return new Date(now.getFullYear(), now.getMonth(), 1);
 
