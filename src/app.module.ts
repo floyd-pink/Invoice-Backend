@@ -19,6 +19,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { BusinessSubscriptionModule } from './business-subscription/business-subscription.module';
 import { RedisModule } from './common/redis/redis.module';
+import { QuickSalesModule } from './quick-sales/quick-sales.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { RedisModule } from './common/redis/redis.module';
     GuardsModule,
     BusinessSubscriptionModule,
     RedisModule,
+    QuickSalesModule,
   ],
   controllers: [AppController],
   providers: [

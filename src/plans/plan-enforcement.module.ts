@@ -5,6 +5,7 @@ import { PlanEnforcementService } from './plan-enforcement.service';
 import { InvoiceEntity } from 'src/invoice_items/entities/invoice.entity';
 import { BusinessSubscriptionEntity } from './../business-subscription/entities/business-subscription.entity';
 import { BusinessCustomer } from 'src/business-customer/entities/business-customer.entity';
+import { QuickSalesEntity } from 'src/quick-sales/entities/quickSales.entity';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { BusinessCustomer } from 'src/business-customer/entities/business-custom
       InvoiceEntity,
       BusinessSubscriptionEntity,
       BusinessCustomer,
+      QuickSalesEntity,
     ]),
     RedisModule,
   ],

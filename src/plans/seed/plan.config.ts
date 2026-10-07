@@ -18,6 +18,11 @@ export const DEFAULT_PLAN_CONFIGS = [
         limit: 10,
         period: LimitPeriod.MONTHLY,
       },
+      {
+        feature: PlanFeature.Create_Quick_Sale,
+        limit: 50,
+        period: LimitPeriod.DAILY,
+      },
     ],
   },
 
@@ -37,6 +42,11 @@ export const DEFAULT_PLAN_CONFIGS = [
         limit: 100,
         period: LimitPeriod.MONTHLY,
       },
+      {
+        feature: PlanFeature.Create_Quick_Sale,
+        limit: 200,
+        period: LimitPeriod.DAILY,
+      },
     ],
   },
 
@@ -53,6 +63,11 @@ export const DEFAULT_PLAN_CONFIGS = [
       },
       {
         feature: PlanFeature.Create_Customer,
+        limit: null,
+        period: LimitPeriod.NONE,
+      },
+      {
+        feature: PlanFeature.Create_Quick_Sale,
         limit: null,
         period: LimitPeriod.NONE,
       },
