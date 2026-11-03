@@ -2,7 +2,7 @@ import { Controller, Post, UseGuards, Body, Get, Query } from '@nestjs/common';
 
 import { QuickSalesService } from './quick-sales.service';
 import { JwtAuthGuard } from 'src/common/guards/guards.module';
-import { ActiveUser } from 'src/common/decorators/active-user.decorator';
+import { BusinessId } from 'src/common/decorators/business-id.decorator';
 import { CreateQuickSalesDto } from './dto/quickSales.dto';
 import {
   ApiBearerAuth,
@@ -28,11 +28,10 @@ export class QuickSalesController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Business not found' })
   async createQuickSale(
-    @ActiveUser() user: { sub: string },
+    @BusinessId() businessId: string,
     @Body() dto: CreateQuickSalesDto,
   ) {
-    const userId = Number(user.sub);
-    return this.quickSalesService.createQuickSale(dto, userId);
+    return this.quickSalesService.createQuickSale(dto, businessId);
   }
   @Get('my-quick-sales')
   @ApiOperation({ summary: 'Get quick sales for current user business' })
@@ -46,12 +45,11 @@ export class QuickSalesController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Business not found' })
   async getMyQuickSales(
-    @ActiveUser() user: { sub: string },
+    @BusinessId() businessId: string,
     @Query('date') date?: string,
   ) {
-    const userId = Number(user.sub);
     return this.quickSalesService.getQuickSales(
-      userId,
+      businessId,
       date ? new Date(date) : undefined,
     );
   }

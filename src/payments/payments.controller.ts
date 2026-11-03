@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { BusinessId } from 'src/common/decorators/business-id.decorator';
 import { PaymentsService } from './payments.service';
 import { ReceivePaymentDto } from './dto/receive-payment.dto';
 import {
@@ -34,7 +35,8 @@ export class PaymentsController {
   async receivePayment(
     @Param('invoiceId', ParseUUIDPipe) invoiceId: string,
     @Body() payload: ReceivePaymentDto,
+    @BusinessId() businessId: string,
   ) {
-    return this.paymentService.receivePayment(payload, invoiceId);
+    return this.paymentService.receivePayment(payload, invoiceId, businessId);
   }
 }

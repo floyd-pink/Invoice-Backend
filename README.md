@@ -147,8 +147,8 @@ The server runs at `http://localhost:3001`
 |--------|-------------------------------|------------------------------------------------------|-------------|
 | POST   | `/auth/login`                  | Log in as business or customer, returns JWT           
 | POST   | `/auth/sign-up`               | Register a new business or customer account              
-| POST   | `/create-business`                     | Register a new business (owner must be logged in)  
-| POST   | `/business/:businessId/register`                     | Register a new customer under a business              
+| POST   | `/business/create-business`                     | Register a new business (owner must be logged in)
+| POST   | `/customers/register`                     | Register a new customer under the selected business
 
 
 
@@ -182,4 +182,3 @@ $ npm run test:e2e
 # test coverage
 $ npm run test:cov
 ```
-

@@ -18,10 +18,15 @@ export class PaymentsService {
     private readonly invoiceCalculationService: InvoiceCalculationService,
   ) {}
 
-  async receivePayment(payload: ReceivePaymentDto, invoiceId: string) {
+  async receivePayment(
+    payload: ReceivePaymentDto,
+    invoiceId: string,
+    businessId: string,
+  ) {
     const invoice = await this.invoiceRepository.findOne({
       where: {
         id: invoiceId,
+        business: { business_id: businessId },
       },
     });
 

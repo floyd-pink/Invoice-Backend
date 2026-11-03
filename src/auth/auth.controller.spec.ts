@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
+import { JwtService } from '@nestjs/jwt';
 
 const validRegisterPayload: RegisterDto = {
   name: 'Kc Ramesh',
@@ -53,6 +54,10 @@ describe('AuthController', () => {
         {
           provide: AuthService,
           useValue: authService,
+        },
+        {
+          provide: JwtService,
+          useValue: {},
         },
       ],
     }).compile();
