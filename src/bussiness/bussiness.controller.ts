@@ -2,6 +2,7 @@ import { Controller, Post, Body } from '@nestjs/common';
 import { CreateBusinessDto } from './dto/bussiness.dto';
 import { BusinessService } from './bussiness.service';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
+import { SkipBusinessContext } from 'src/common/decorators/skip-business-context.decorator';
 import {
   ApiTags,
   ApiOperation,
@@ -16,6 +17,7 @@ export class BusinessController {
   constructor(private readonly businessService: BusinessService) {}
 
   @Post('create-business')
+  @SkipBusinessContext()
   @ApiOperation({ summary: 'Create a new business' })
   @ApiResponse({ status: 201, description: 'Business created successfully' })
   @ApiResponse({ status: 400, description: 'Validation error' })

@@ -20,5 +20,6 @@ import { RedisModule } from 'src/common/redis/redis.module';
   ],
   controllers: [BusinessController],
   providers: [BusinessService],
+  exports: [BusinessService],
 })
 export class BusinessModule {}

@@ -28,6 +28,16 @@ export class BusinessService {
     private readonly redisService: RedisService,
   ) {}
 
+  //answer if the business exists and the user is the owner of the business
+  async isMember(businessId: string, userId: number): Promise<boolean> {
+    const business = await this.businessRepository.findOne({
+      where: {
+        business_id: businessId,
+        owner: { id: userId },
+      },
+    });
+    return !!business; //return true if business exists and user is the owner, otherwise false
+  }
   async createBusiness(payload: CreateBusinessDto, userId: string) {
     const numericUserId = Number(userId);
     let freePlan = await this.redisService.getCachedFreePlan<

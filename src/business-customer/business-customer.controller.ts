@@ -1,6 +1,7 @@
-import { Controller, UseGuards, Get, Param } from '@nestjs/common';
+import { Controller, UseGuards, Get } from '@nestjs/common';
 import { BusinessCustomerService } from './business-customer.service';
 import { ActiveUser } from 'src/common/decorators/active-user.decorator';
+import { BusinessId } from 'src/common/decorators/business-id.decorator';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
 @Controller('business-customer')
@@ -9,11 +10,11 @@ export class BusinessCustomerController {
     private readonly businessCustomerService: BusinessCustomerService,
   ) {}
 
-  @Get(':businessId/customers')
+  @Get('customers')
   @UseGuards(JwtAuthGuard)
   async getBusinessAssociatedCustomer(
     @ActiveUser() user: { sub: string },
-    @Param('businessId') businessId: string,
+    @BusinessId() businessId: string,
   ) {
     return this.businessCustomerService.getBusinessAssociatedCustomers(
       businessId,

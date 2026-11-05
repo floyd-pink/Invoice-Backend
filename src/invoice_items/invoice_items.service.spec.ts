@@ -5,7 +5,8 @@ import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InvoiceItemsService } from './invoice_items.service';
 import { BusinessEntity } from 'src/bussiness/entities/bussiness.entity';
 import { BusinessCustomer } from 'src/business-customer/entities/business-customer.entity';
-
+import { InvoiceCalculationService } from './services/invoice-calculation.service';
+import { PlanEnforcementService } from 'src/plans/plan-enforcement.service';
 describe('InvoiceItemsService', () => {
   let service: InvoiceItemsService;
 
@@ -46,6 +47,11 @@ describe('InvoiceItemsService', () => {
           useValue: mockBusinessCustomerRepository,
         },
         { provide: DataSource, useValue: mockDataSource },
+        InvoiceCalculationService,
+        {
+          provide: PlanEnforcementService,
+          useValue: { checkPlanLimit: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -140,7 +146,7 @@ describe('InvoiceItemsService', () => {
       expect(mockQueryRunner.rollbackTransaction).not.toHaveBeenCalled();
       expect(mockQueryRunner.release).toHaveBeenCalled();
       expect(result).toEqual(
-        expect.objectContaining({ message: 'Invoice created Successfully' }),
+        expect.objectContaining({ message: 'Invoice created successfully' }),
       );
     });
 

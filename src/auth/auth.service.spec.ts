@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
 import { UserEntity } from './entities/auth.entity';
+import { BusinessEntity } from 'src/bussiness/entities/bussiness.entity';
+import { BusinessService } from 'src/bussiness/bussiness.service';
 import { JwtService } from '@nestjs/jwt';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import * as bcrypt from 'bcryptjs';
@@ -64,6 +66,7 @@ function loginResponseMock() {
 function createMockRepository() {
   return {
     findOne: jest.fn(),
+    find: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
   };
@@ -78,7 +81,9 @@ function createMockJwtService() {
 describe('AuthService', () => {
   let service: AuthService;
   let mockRepository: ReturnType<typeof createMockRepository>;
+  let mockBusinessRepository: ReturnType<typeof createMockRepository>;
   let mockJwtService: ReturnType<typeof createMockJwtService>;
+  let mockBusinessService: { isMember: jest.Mock };
 
   //this gives us access to Jest methods on mocked bcrypt functions
   let mockBcrypt: jest.Mocked<typeof bcrypt>;
@@ -86,7 +91,10 @@ describe('AuthService', () => {
   beforeEach(async () => {
     //creating fresh mock dependencies before every test
     mockRepository = createMockRepository();
+    mockBusinessRepository = createMockRepository();
+    mockBusinessRepository.find.mockResolvedValue([]);
     mockJwtService = createMockJwtService();
+    mockBusinessService = { isMember: jest.fn() };
 
     mockBcrypt = bcrypt as jest.Mocked<typeof bcrypt>;
 
@@ -109,6 +117,14 @@ describe('AuthService', () => {
           //providing fake JwtService instead of real JwtService
           provide: JwtService,
           useValue: mockJwtService,
+        },
+        {
+          provide: getRepositoryToken(BusinessEntity),
+          useValue: mockBusinessRepository,
+        },
+        {
+          provide: BusinessService,
+          useValue: mockBusinessService,
         },
       ],
     }).compile();
@@ -289,6 +305,8 @@ describe('AuthService', () => {
 
       expect(result).toEqual({
         access_token: 'mocked-jwt-token',
+        requiresBusinessSelection: false,
+        businesses: [],
         user: {
           id: mockUser.id,
           name: mockUser.name,
@@ -344,6 +362,75 @@ describe('AuthService', () => {
 
       await expect(result).rejects.toThrow('Database failure');
       expect(mockRepository.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('selects the only business in the login token', async () => {
+      const user = createMockUser();
+      const business = { business_id: 'business-1', business_name: 'First' };
+      mockRepository.findOne.mockResolvedValue(user);
+      mockBusinessRepository.find.mockResolvedValue([business]);
+
+      const result = await service.Login(createLoginPayload());
+
+      expect(mockJwtService.sign).toHaveBeenCalledWith({
+        sub: user.id,
+        email: user.email,
+        role: user.role,
+        businessId: business.business_id,
+      });
+      expect(result.requiresBusinessSelection).toBe(false);
+      expect(result.businesses).toEqual([
+        { BusinessName: 'First', BusinessId: 'business-1' },
+      ]);
+    });
+
+    it('requires selection without preselecting a business when multiple exist', async () => {
+      const user = createMockUser();
+      mockRepository.findOne.mockResolvedValue(user);
+      mockBusinessRepository.find.mockResolvedValue([
+        { business_id: 'business-1', business_name: 'First' },
+        { business_id: 'business-2', business_name: 'Second' },
+      ]);
+
+      const result = await service.Login(createLoginPayload());
+
+      expect(mockJwtService.sign).toHaveBeenCalledWith({
+        sub: user.id,
+        email: user.email,
+        role: user.role,
+      });
+      expect(result.requiresBusinessSelection).toBe(true);
+      expect(result.businesses).toHaveLength(2);
+    });
+  });
+
+  describe('selectBusiness', () => {
+    it('signs a scoped token with the current user claims after ownership check', async () => {
+      const user = createMockUser({ role: 'admin' });
+      mockBusinessService.isMember.mockResolvedValue(true);
+      mockRepository.findOne.mockResolvedValue(user);
+
+      await service.selectBusiness('business-2', user.id);
+
+      expect(mockBusinessService.isMember).toHaveBeenCalledWith(
+        'business-2',
+        user.id,
+      );
+      expect(mockJwtService.sign).toHaveBeenCalledWith({
+        sub: user.id,
+        email: user.email,
+        role: 'admin',
+        businessId: 'business-2',
+      });
+    });
+
+    it('rejects a business the user does not own', async () => {
+      mockBusinessService.isMember.mockResolvedValue(false);
+
+      await expect(service.selectBusiness('other-business', 1)).rejects.toThrow(
+        'Business not accessible',
+      );
+      expect(mockJwtService.sign).not.toHaveBeenCalled();
     });
   });
 });

@@ -27,9 +27,9 @@ export class QuickSalesService {
     private readonly planEnforcementService: PlanEnforcementService,
   ) {}
 
-  async createQuickSale(dto: CreateQuickSalesDto, userId: number) {
+  async createQuickSale(dto: CreateQuickSalesDto, businessId: string) {
     const business = await this.businessRepository.findOne({
-      where: { owner: { id: userId } },
+      where: { business_id: businessId },
       select: {
         business_id: true,
       },
@@ -103,9 +103,9 @@ export class QuickSalesService {
     }
   }
 
-  async getQuickSales(userId: number, date?: Date) {
+  async getQuickSales(businessId: string, date?: Date) {
     const business = await this.businessRepository.findOne({
-      where: { owner: { id: userId } },
+      where: { business_id: businessId },
       select: { business_id: true },
     });
     if (!business) {

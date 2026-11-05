@@ -20,6 +20,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { BusinessSubscriptionModule } from './business-subscription/business-subscription.module';
 import { RedisModule } from './common/redis/redis.module';
 import { QuickSalesModule } from './quick-sales/quick-sales.module';
+import { BusinessContextGuard } from './common/guards/business-context.guard';
 
 @Module({
   imports: [
@@ -65,6 +66,10 @@ import { QuickSalesModule } from './quick-sales/quick-sales.module';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard, //making JwtAuthGuard global for all routes, no need to use in every controller
+    },
+    {
+      provide: APP_GUARD,
+      useClass: BusinessContextGuard,
     },
     {
       provide: APP_GUARD,
