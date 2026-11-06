@@ -20,7 +20,9 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { BusinessSubscriptionModule } from './business-subscription/business-subscription.module';
 import { RedisModule } from './common/redis/redis.module';
 import { QuickSalesModule } from './quick-sales/quick-sales.module';
+
 import { BusinessContextGuard } from './common/guards/business-context.guard';
+import { SalesReportModule } from './sales-report/sales-report.module';
 
 @Module({
   imports: [
@@ -43,6 +45,7 @@ import { BusinessContextGuard } from './common/guards/business-context.guard';
           connectionTimeoutMillis: 60000,
           retryAttempts: 3,
           retryDelay: 5000,
+          options: '-c timezone=UTC',
         },
         synchronize: true,
       }),
@@ -59,6 +62,7 @@ import { BusinessContextGuard } from './common/guards/business-context.guard';
     BusinessSubscriptionModule,
     RedisModule,
     QuickSalesModule,
+    SalesReportModule,
   ],
   controllers: [AppController],
   providers: [
