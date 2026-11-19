@@ -12,6 +12,16 @@ import { CreateQuickSalesDto } from './dto/quickSales.dto';
 import { QuickSaleStatus } from './entities/quickSales.entity';
 import { PlanEnforcementService } from 'src/plans/plan-enforcement.service';
 import { PlanFeature } from 'src/plans/enum/plan-feature.enum';
+import type { QuickSalesReportDto } from './dto/quick-sales-query.dto';
+import { isValidUtcCalendarDate } from 'src/common/decorators/is-valid-utc-date.validator';
+
+type QuickSaleReport = {
+  date: string;
+  totalSales: string;
+  totalAmount: string;
+};
+const utcTimestamp = (value: Date) =>
+  value.toISOString().replace('T', ' ').replace('Z', '');
 
 @Injectable()
 export class QuickSalesService {
@@ -28,19 +38,9 @@ export class QuickSalesService {
   ) {}
 
   async createQuickSale(dto: CreateQuickSalesDto, businessId: string) {
-    const business = await this.businessRepository.findOne({
-      where: { business_id: businessId },
-      select: {
-        business_id: true,
-      },
-    });
-
-    if (!business) {
-      throw new NotFoundException('Business not found');
-    }
-
+    await this.assertBusinessExists(businessId);
     await this.planEnforcementService.checkPlanLimit(
-      business.business_id,
+      businessId,
       PlanFeature.Create_Quick_Sale,
     );
 
@@ -60,7 +60,7 @@ export class QuickSalesService {
 
     try {
       const quickSale = queryRunner.manager.create(QuickSalesEntity, {
-        business: { business_id: business.business_id } as BusinessEntity,
+        business: { business_id: businessId } as BusinessEntity,
         totalAmount,
         paymentMethod: dto.paymentMethod,
         paymentReference: dto.paymentReference,
@@ -84,7 +84,7 @@ export class QuickSalesService {
 
       return {
         message: 'Quick sale created successfully',
-        businessId: business.business_id,
+        businessId: businessId,
         quickSaleId: quickSale.id,
         quickSaleTotalAmount: quickSale.totalAmount,
         quickSaleNumber: quickSale.quickSaleNumber,
@@ -103,7 +103,88 @@ export class QuickSalesService {
     }
   }
 
-  async getQuickSales(businessId: string, date?: Date) {
+  async getQuickSales(businessId: string, date?: string) {
+    await this.assertBusinessExists(businessId);
+    const query = this.quickSalesRepository
+      .createQueryBuilder('qs')
+      .leftJoinAndSelect('qs.items', 'items')
+      .where('qs.businessId = :businessId', {
+        businessId: businessId,
+      });
+
+    if (date) {
+      const start = new Date(`${date}T00:00:00.000Z`);
+      const end = new Date(start);
+      end.setUTCDate(end.getUTCDate() + 1);
+
+      query.andWhere('qs.createdAt >= :start AND qs.createdAt < :end', {
+        start: utcTimestamp(start),
+        end: utcTimestamp(end),
+      });
+    }
+    return query.orderBy('qs.createdAt', 'DESC').getMany();
+  }
+
+  async getQuickSalesReport(businessId: string, payload: QuickSalesReportDto) {
+    if ((payload.from && !payload.to) || (!payload.from && payload.to)) {
+      throw new BadRequestException('Provide both from and to dates');
+    }
+
+    const now = new Date();
+    const today = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    const sixDaysAgo = new Date(today);
+    sixDaysAgo.setUTCDate(sixDaysAgo.getUTCDate() - 6);
+
+    const to = payload.to ?? today.toISOString().slice(0, 10);
+    const from = payload.from ?? sixDaysAgo.toISOString().slice(0, 10);
+
+    if (!isValidUtcCalendarDate(from) || !isValidUtcCalendarDate(to)) {
+      throw new BadRequestException('Dates must use YYYY-MM-DD');
+    }
+    const fromDate = new Date(`${from}T00:00:00.000Z`);
+    const toDate = new Date(`${to}T00:00:00.000Z`);
+    if (fromDate > toDate) {
+      throw new BadRequestException(
+        'From date must be before or equal to to date',
+      );
+    }
+
+    if (toDate > today) {
+      throw new BadRequestException('Future report dates are not allowed');
+    }
+
+    const requestedEnd = new Date(toDate);
+    requestedEnd.setUTCDate(requestedEnd.getUTCDate() + 1);
+    if (requestedEnd > this.threeCalendarMonthsAfter(fromDate)) {
+      throw new BadRequestException('Report range cannot exceed 3 months');
+    }
+
+    await this.assertBusinessExists(businessId);
+    const endDate = toDate.getTime() === today.getTime() ? now : requestedEnd;
+    const baseQuery = this.quickSalesRepository
+      .createQueryBuilder('qs')
+      .where('qs.businessId = :businessId', { businessId })
+      .andWhere('qs.status = :status', { status: QuickSaleStatus.COMPLETED })
+      .andWhere('qs.createdAt >= :start AND qs.createdAt < :end', {
+        start: utcTimestamp(fromDate),
+        end: utcTimestamp(endDate),
+      });
+    const dailyQuickSales = await baseQuery
+      .select("TO_CHAR(qs.createdAt, 'YYYY-MM-DD')", 'date')
+      .addSelect('COUNT(qs.id)', 'totalSales')
+      .addSelect('COALESCE(SUM(qs.totalAmount), 0)', 'totalAmount')
+      .groupBy("TO_CHAR(qs.createdAt, 'YYYY-MM-DD')")
+      .orderBy('date', 'ASC')
+      .getRawMany<QuickSaleReport>();
+
+    return {
+      dailyQuickSales,
+    };
+  }
+
+  private async assertBusinessExists(businessId: string): Promise<void> {
     const business = await this.businessRepository.findOne({
       where: { business_id: businessId },
       select: { business_id: true },
@@ -111,20 +192,16 @@ export class QuickSalesService {
     if (!business) {
       throw new NotFoundException('Business not found');
     }
-    const query = this.quickSalesRepository
-      .createQueryBuilder('qs')
-      .leftJoinAndSelect('qs.items', 'items')
-      .where('qs.businessId = :businessId', {
-        businessId: business.business_id,
-      });
+  }
 
-    if (date) {
-      const start = new Date(date);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(date);
-      end.setHours(23, 59, 59, 999);
-      query.andWhere('qs.createdAt BETWEEN :start AND :end', { start, end });
-    }
-    return query.orderBy('qs.createdAt', 'DESC').getMany();
+  private threeCalendarMonthsAfter(start: Date): Date {
+    const limit = new Date(start);
+    limit.setUTCDate(1);
+    limit.setUTCMonth(limit.getUTCMonth() + 3);
+    const lastDay = new Date(limit);
+    lastDay.setUTCMonth(lastDay.getUTCMonth() + 1);
+    lastDay.setUTCDate(0);
+    limit.setUTCDate(Math.min(start.getUTCDate(), lastDay.getUTCDate()));
+    return limit;
   }
 }

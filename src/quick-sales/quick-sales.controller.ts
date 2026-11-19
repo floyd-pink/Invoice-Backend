@@ -9,8 +9,11 @@ import {
   ApiOperation,
   ApiResponse,
   ApiTags,
-  ApiQuery,
 } from '@nestjs/swagger';
+import {
+  QuickSalesQueryDto,
+  QuickSalesReportDto,
+} from './dto/quick-sales-query.dto';
 
 @ApiTags('Quick Sales')
 @ApiBearerAuth('JWT-auth')
@@ -35,22 +38,28 @@ export class QuickSalesController {
   }
   @Get('my-quick-sales')
   @ApiOperation({ summary: 'Get quick sales for current user business' })
-  @ApiQuery({
-    name: 'date',
-    required: false,
-    description: 'Filter by date (YYYY-MM-DD)',
-    example: '2026-10-06',
-  })
   @ApiResponse({ status: 200, description: 'List of quick sales with items' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Business not found' })
   async getMyQuickSales(
     @BusinessId() businessId: string,
-    @Query('date') date?: string,
+    @Query() query: QuickSalesQueryDto,
   ) {
-    return this.quickSalesService.getQuickSales(
-      businessId,
-      date ? new Date(date) : undefined,
-    );
+    return this.quickSalesService.getQuickSales(businessId, query.date);
+  }
+
+  @Get('my-quick-sales-report')
+  @ApiOperation({ summary: 'Get quick sales report for current user business' })
+  @ApiResponse({
+    status: 200,
+    description: 'Daily quick sales counts and total amounts',
+  })
+  @ApiResponse({ status: 400, description: 'Invalid date range' })
+  @ApiResponse({ status: 404, description: 'Business not found' })
+  async getMyQuickSalesReport(
+    @BusinessId() businessId: string,
+    @Query() query: QuickSalesReportDto,
+  ) {
+    return this.quickSalesService.getQuickSalesReport(businessId, query);
   }
 }
