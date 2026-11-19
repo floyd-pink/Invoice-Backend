@@ -37,6 +37,10 @@ export class PlanEnforcementService {
   ): Promise<void> {
     // 1. Trying  Redis first
     let planData = await this.redisService.getCachedSubscription(businessId);
+    // Entries written before expiresAt was cached must be reloaded from the database.
+    if (planData && !('expiresAt' in planData)) {
+      planData = undefined;
+    }
 
     // 2. Cache miss -> fetch from database
     if (!planData) {
@@ -60,6 +64,7 @@ export class PlanEnforcementService {
       planData = {
         planId: subscription.planId,
         planType: subscription.plan.type,
+        expiresAt: subscription.endsAt,
         features: subscription.plan.features.map((f) => ({
           feature: f.feature,
           limit: f.limit,
@@ -70,6 +75,11 @@ export class PlanEnforcementService {
 
       // Save to Redis
       await this.redisService.setCachedSubscription(businessId, planData);
+    }
+
+    const now = new Date();
+    if (planData.expiresAt && new Date(planData.expiresAt) <= now) {
+      throw new ForbiddenException('Your subscription plan has expired.');
     }
 
     // 3. Find requested feature
