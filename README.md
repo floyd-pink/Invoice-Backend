@@ -134,7 +134,7 @@ Quick sales are separate from invoices and do not require a customer. Example bo
 }
 ```
 
-The service calculates the total, applies the plan limit, and stores the sale and its items in a transaction. `GET /quick-sales/my-quick-sales` lists sales for the business; its optional `date` filter is implemented separately from the invoice sales report.
+The service calculates the total, applies the plan limit, and stores the sale and its items in a transaction. `GET /quick-sales/my-quick-sales` lists sales for the business; its optional `date=YYYY-MM-DD` filter selects a UTC calendar day and returns `400 Bad Request` for an invalid date. `GET /quick-sales/my-quick-sales-report` returns daily counts and amounts for completed quick sales. Without parameters, it covers today and the previous six UTC dates. For a custom range, provide both `from` and `to`; they are inclusive, can be from any past year, and must span no more than three calendar months. Future dates are rejected. For example, `2020-01-01` through `2020-03-31` is allowed, while `2020-01-01` through `2020-04-01` is not. These routes are separate from the invoice sales report.
 
 ### Plans and subscriptions
 

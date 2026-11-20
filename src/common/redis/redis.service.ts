@@ -24,6 +24,7 @@ export class RedisService {
     return this.get<{
       planId: number;
       planType: string;
+      expiresAt: Date | null;
       features: Array<{
         feature: PlanFeature;
         limit: number | null;
