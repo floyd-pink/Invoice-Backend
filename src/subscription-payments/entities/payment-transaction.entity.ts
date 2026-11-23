@@ -22,6 +22,10 @@ export enum TransactionStatus {
 @Index('IDX_PAYMENT_TRANS_PROVIDER_STATUS', ['provider', 'status'])
 @Index('IDX_PAYMENT_TRANS_BUSINESS', ['businessId'])
 @Index('IDX_PAYMENT_TRANS_SUBSCRIPTION', ['subscriptionId'])
+@Index('UQ_PAYMENT_PROVIDER_REFERENCE', ['provider', 'providerTransactionId'], {
+  unique: true,
+})
+@Index('UQ_PAYMENT_OWNER_REQUEST', ['ownerId', 'requestId'], { unique: true })
 export class PaymentTransactionEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -29,8 +33,13 @@ export class PaymentTransactionEntity {
   @Column({ name: 'provider', type: 'enum', enum: PaymentProvider })
   provider: PaymentProvider;
 
-  @Column({ name: 'provider_transaction_id', type: 'varchar', length: 255 })
-  providerTransactionId: string;
+  @Column({
+    name: 'provider_transaction_id',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  providerTransactionId: string | null;
 
   @Column({
     name: 'status',
@@ -50,13 +59,19 @@ export class PaymentTransactionEntity {
   businessId: string;
 
   @Column({ name: 'subscription_id', type: 'int', nullable: true })
-  subscriptionId?: number;
+  subscriptionId: number | null;
 
   @Column({ name: 'plan_id', type: 'int' })
   planId: number;
 
-  @Column({ name: 'customer_id', type: 'uuid' })
-  customerId: string;
+  @Column({ name: 'owner_id', type: 'int' })
+  ownerId: number;
+
+  @Column({ name: 'request_id', type: 'uuid', nullable: true })
+  requestId: string | null;
+
+  @Column({ name: 'checkout_url', type: 'text', nullable: true })
+  checkoutUrl: string | null;
 
   @Column({ name: 'gateway_payload', type: 'jsonb', nullable: true })
   gatewayPayload?: Record<string, any>;
@@ -66,9 +81,6 @@ export class PaymentTransactionEntity {
 
   @Column({ name: 'retry_count', type: 'int', default: 0 })
   retryCount: number;
-
-  @Column({ name: 'idempotency_key', type: 'varchar', length: 255, unique: true })
-  idempotencyKey: string;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

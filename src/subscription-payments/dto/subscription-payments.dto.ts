@@ -1,51 +1,25 @@
 import {
   IsEnum,
-  IsNumber,
-  IsOptional,
+  IsInt,
   IsUUID,
   Min,
-  IsString,
-  IsEmail,
 } from 'class-validator';
 import { PaymentProvider } from '../enums/payment-provider.enum';
 
 export class InitiateSubscriptionPaymentDto {
-  //this is HTTP contract
+  // Reuse the same UUID if the checkout request is retried.
+  @IsUUID()
+  requestId: string;
+
   @IsUUID()
   businessId: string;
 
-  @IsNumber()
-  @Min(0)
-  amount: number;
-
-  @IsString()
-  currency: string;
-
-  @IsNumber()
+  @IsInt()
+  @Min(1)
   planId: number;
-
-  @IsUUID()
-  customerId: string;
-
-  @IsEmail()
-  customerEmail: string;
-
-  @IsString()
-  customerName: string;
 
   @IsEnum(PaymentProvider, {
     message: 'paymentProvider must be a valid provider',
   })
   paymentProvider: PaymentProvider;
-
-  @IsOptional()
-  @IsString()
-  returnUrl?: string;
-
-  @IsOptional()
-  @IsString()
-  cancelUrl?: string;
-
-  @IsOptional()
-  subscriptionId?: number;
 }

@@ -1,329 +1,422 @@
 import {
+  BadGatewayException,
   BadRequestException,
+  ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
-import crypto from 'crypto';
-
-import { PaymentGatewayFactory } from './factories/payment-gateway.factory';
-import { PaymentProvider, PaymentRequest, PaymentStatus } from './interfaces';
-import {
-  PaymentTransactionEntity,
-  TransactionStatus,
-} from './entities/payment-transaction.entity';
-import { PlanEntity } from 'src/plans/entities/plan.entity';
+import { DataSource, Not, Repository } from 'typeorm';
 import { BusinessEntity } from 'src/bussiness/entities/bussiness.entity';
 import {
   BusinessSubscriptionEntity,
   SubscriptionStatus,
 } from 'src/business-subscription/entities/business-subscription.entity';
+import { RedisService } from 'src/common/redis/redis.service';
+import { PlanEntity } from 'src/plans/entities/plan.entity';
+import { PlanBillingCycle, PlanType } from 'src/plans/enum/plan-type.enum';
+import { InitiateSubscriptionPaymentDto } from './dto/subscription-payments.dto';
+import {
+  PaymentTransactionEntity,
+  TransactionStatus,
+} from './entities/payment-transaction.entity';
+import { PaymentProvider } from './enums/payment-provider.enum';
+import { PaymentGatewayFactory } from './factories/payment-gateway.factory';
+import { PaymentRequest, PaymentResponse, PaymentStatus } from './interfaces';
 
+/** A payment attempt belongs to one owner, one business, and one plan. */
 @Injectable()
 export class SubscriptionPaymentsService {
   constructor(
     @InjectRepository(PaymentTransactionEntity)
-    private readonly transactionRepo: Repository<PaymentTransactionEntity>,
-
+    private readonly transactions: Repository<PaymentTransactionEntity>,
     @InjectRepository(PlanEntity)
-    private readonly planRepo: Repository<PlanEntity>,
-
+    private readonly plans: Repository<PlanEntity>,
     @InjectRepository(BusinessEntity)
-    private readonly businessRepo: Repository<BusinessEntity>,
-
-    @InjectRepository(BusinessSubscriptionEntity)
-    private readonly subscriptionRepo: Repository<BusinessSubscriptionEntity>,
-
+    private readonly businesses: Repository<BusinessEntity>,
     private readonly dataSource: DataSource,
-
-    private readonly gatewayFactory: PaymentGatewayFactory,
+    private readonly gateways: PaymentGatewayFactory,
+    private readonly config: ConfigService,
+    private readonly redis: RedisService,
   ) {}
 
-  async initiatePayment(dto: {
-    businessId: string;
-    planId: number;
-    customerId: string;
-    paymentProvider: PaymentProvider;
-    amount?: number;
-    currency?: string;
-    returnUrl?: string;
-    cancelUrl?: string;
-    subscriptionId?: number;
-  }): Promise<any> {
-    const [plan, business] = await Promise.all([
-      this.planRepo.findOne({ where: { id: dto.planId } }),
-      this.businessRepo.findOne({
-        where: { business_id: dto.businessId },
+  async startCheckout(ownerId: number, dto: InitiateSubscriptionPaymentDto) {
+    const [business, plan] = await Promise.all([
+      this.businesses.findOne({
+        where: { business_id: dto.businessId, owner: { id: ownerId } },
         relations: { owner: true },
       }),
+      this.plans.findOne({ where: { id: dto.planId, isActive: true } }),
     ]);
-
-    if (!plan) throw new NotFoundException(`Plan not found: ${dto.planId}`);
-    if (!business)
-      throw new NotFoundException(`Business not found: ${dto.businessId}`);
-    if (!plan.isActive) throw new BadRequestException('Plan is not active');
-
-    const paymentRequest: PaymentRequest = {
-      amount: dto.amount ?? Number(plan.price),
-      currency: dto.currency ?? 'NPR',
-      businessId: dto.businessId,
-      subscriptionId: dto.subscriptionId,
-      planId: plan.id,
-      billingCycle: plan.billingCycle,
-      customerId: dto.customerId,
-      customerEmail: business.owner?.email ?? dto.customerId,
-      customerName: business.business_name,
-      returnUrl: dto.returnUrl,
-      cancelUrl: dto.cancelUrl,
-    };
-
-    const idempotencyKey = this.buildIdempotencyKey(dto);
-    const existing = await this.transactionRepo.findOne({
-      where: { idempotencyKey },
-    });
-
-    let transaction: PaymentTransactionEntity;
-
-    if (existing) {
-      // Case 1: Still pending → re-verify with gateway
-      if (
-        existing.status === TransactionStatus.PENDING ||
-        existing.status === TransactionStatus.PROCESSING
-      ) {
-        const gateway = this.gatewayFactory.resolve(dto.paymentProvider);
-        try {
-          const currentStatus = await gateway.verifyPayment(
-            existing.providerTransactionId,
-          );
-          await this.transactionRepo.update(existing.id, {
-            status: this.mapToTransactionStatus(currentStatus.status),
-            gatewayPayload: currentStatus.rawResponse,
-            completedAt:
-              currentStatus.status === PaymentStatus.SUCCEEDED
-                ? new Date()
-                : undefined,
-          });
-          if (currentStatus.status === PaymentStatus.SUCCEEDED)
-            await this.activateSubscription(existing);
-          return {
-            ...currentStatus,
-            message: 'Retrieved existing payment session',
-          };
-        } catch {
-          return {
-            status: PaymentStatus.FAILED,
-            transactionId: existing.providerTransactionId,
-            message: 'Failed to verify existing payment session',
-          };
-        }
-      }
-
-      // Case 2: Already succeeded
-      if (existing.status === TransactionStatus.SUCCEEDED) {
-        return {
-          status: PaymentStatus.SUCCEEDED,
-          transactionId: existing.providerTransactionId,
-          message: 'Payment already completed successfully',
-        };
-      }
-
-      // Case 3: Previous attempt failed/cancelled → REUSE existing record
-      await this.transactionRepo.update(existing.id, {
-        status: TransactionStatus.PENDING,
-        errorMessage: undefined,
-        retryCount: existing.retryCount + 1,
-        providerTransactionId: undefined,
-        gatewayPayload: undefined,
-        completedAt: null,
-      });
-      transaction = existing; // ← KEY: reuse existing record
-    } else {
-      // No existing transaction - create new
-      transaction = this.transactionRepo.create({
-        providerTransactionId: crypto.randomUUID(),
-        provider: dto.paymentProvider,
-        status: TransactionStatus.PENDING,
-        amount: paymentRequest.amount,
-        currency: paymentRequest.currency,
-        businessId: dto.businessId,
-        subscriptionId: dto.subscriptionId,
-        planId: dto.planId,
-        customerId: dto.customerId,
-        idempotencyKey,
-      });
-      await this.transactionRepo.save(transaction);
+    if (!business) throw new ForbiddenException('You do not own this business');
+    if (!plan) throw new NotFoundException('Active plan not found');
+    if (plan.type === PlanType.FREE) {
+      throw new BadRequestException('The Free plan does not need payment');
     }
 
-    // Single gateway call for both new and reused transactions
-    const gateway = this.gatewayFactory.resolve(dto.paymentProvider);
+    // PostgreSQL returns decimal columns as strings. The database price is the authority.
+    const priceText = String(plan.price);
+    const amount = Number(priceText);
+    if (
+      !/^\d+(\.\d{1,2})?$/.test(priceText) ||
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      !Number.isSafeInteger(Math.round(amount * 100))
+    ) {
+      throw new InternalServerErrorException('Plan price is invalid');
+    }
+
+    const callbackBase = this.config.get<string>('PAYMENT_CALLBACK_BASE_URL');
+    if (!callbackBase) {
+      throw new InternalServerErrorException(
+        'PAYMENT_CALLBACK_BASE_URL is not configured',
+      );
+    }
+    let baseUrl: URL;
     try {
-      const response = await gateway.createPayment(paymentRequest);
-      await this.transactionRepo.update(transaction.id, {
-        status: this.mapToTransactionStatus(response.status),
-        providerTransactionId: response.transactionId,
-        gatewayPayload: response.rawResponse,
-      });
-      return response;
+      baseUrl = new URL(callbackBase);
+    } catch {
+      throw new InternalServerErrorException(
+        'PAYMENT_CALLBACK_BASE_URL is invalid',
+      );
+    }
+    if (
+      this.config.get<string>('NODE_ENV') === 'production' &&
+      baseUrl.protocol !== 'https:'
+    ) {
+      throw new InternalServerErrorException(
+        'Payment callback URL must use HTTPS',
+      );
+    }
+
+    const provider = dto.paymentProvider;
+    const gateway = this.gateways.resolve(provider);
+    if (!gateway.supportsCurrency('NPR')) {
+      throw new BadRequestException('This provider does not support NPR');
+    }
+
+    const previous = await this.transactions.findOne({
+      where: { ownerId, requestId: dto.requestId },
+    });
+    if (previous) return this.existingCheckout(previous, dto);
+
+    // Save a local attempt before contacting the gateway. Its UUID is our order ID.
+    let attempt: PaymentTransactionEntity;
+    try {
+      attempt = await this.transactions.save(
+        this.transactions.create({
+          businessId: business.business_id,
+          ownerId,
+          requestId: dto.requestId,
+          planId: plan.id,
+          provider,
+          amount,
+          currency: 'NPR',
+          status: TransactionStatus.PENDING,
+          providerTransactionId: null,
+          checkoutUrl: null,
+          subscriptionId: null,
+        }),
+      );
     } catch (error) {
-      await this.transactionRepo.update(transaction.id, {
+      // A simultaneous retry may have inserted the same request ID first.
+      if (error?.code === '23505') {
+        const winner = await this.transactions.findOne({
+          where: { ownerId, requestId: dto.requestId },
+        });
+        if (winner) return this.existingCheckout(winner, dto);
+      }
+      throw error;
+    }
+
+    const callbackPath = `/subscription-payments/return/${provider.toLowerCase()}`;
+    const request: PaymentRequest = {
+      orderId: attempt.id,
+      businessId: business.business_id,
+      planId: plan.id,
+      amount,
+      currency: 'NPR',
+      customerEmail: business.owner.email,
+      customerName: business.business_name,
+      returnUrl: new URL(callbackPath, baseUrl).toString(),
+      cancelUrl: new URL(
+        '/subscription-payments/return/esewa/failure',
+        baseUrl,
+      ).toString(),
+      websiteUrl:
+        this.config.get<string>('PAYMENT_WEBSITE_URL') || baseUrl.origin,
+    };
+
+    try {
+      const checkout = await gateway.createPayment(request);
+      if (
+        checkout.status !== PaymentStatus.PENDING ||
+        !checkout.transactionId
+      ) {
+        throw new BadGatewayException(
+          'Payment provider did not start a session',
+        );
+      }
+      await this.transactions.update(attempt.id, {
+        providerTransactionId: checkout.transactionId,
+        checkoutUrl: checkout.redirectUrl,
+        gatewayPayload: checkout.rawResponse,
+      });
+      return {
+        paymentId: attempt.id,
+        provider,
+        amount,
+        currency: 'NPR',
+        status: TransactionStatus.PENDING,
+        method: provider === PaymentProvider.ESEWA ? 'POST' : 'GET',
+        redirectUrl: checkout.redirectUrl,
+        formFields: checkout.formFields,
+      };
+    } catch (error) {
+      await this.transactions.update(attempt.id, {
         status: TransactionStatus.ERROR,
-        errorMessage: error.message,
-        retryCount: (transaction.retryCount || 0) + 1,
-        completedAt: null,
+        errorMessage:
+          error instanceof Error ? error.message : 'Payment initiation failed',
       });
       throw error;
     }
   }
 
-  async verifyPayment(
-    provider: PaymentProvider,
-    transactionId: string,
-  ): Promise<any> {
-    const gateway = this.gatewayFactory.resolve(provider);
-    const response = await gateway.verifyPayment(transactionId);
-
-    const tx = await this.transactionRepo.findOne({
-      where: { providerTransactionId: transactionId },
-    });
-
-    if (!tx) {
-      throw new NotFoundException(`Transaction not found: ${transactionId}`);
+  private existingCheckout(
+    attempt: PaymentTransactionEntity,
+    dto: InitiateSubscriptionPaymentDto,
+  ) {
+    if (
+      attempt.businessId !== dto.businessId ||
+      attempt.planId !== dto.planId ||
+      attempt.provider !== dto.paymentProvider
+    ) {
+      throw new BadRequestException(
+        'Request ID was already used for a different checkout',
+      );
     }
-
-    await this.transactionRepo.update(tx.id, {
-      status: this.mapToTransactionStatus(response.status),
-      gatewayPayload: response.rawResponse,
-      completedAt:
-        response.status === PaymentStatus.SUCCEEDED ? new Date() : undefined,
-    });
-
-    if (response.status === PaymentStatus.SUCCEEDED) {
-      await this.activateSubscription(tx);
+    if (
+      attempt.status === TransactionStatus.PENDING &&
+      attempt.providerTransactionId &&
+      attempt.checkoutUrl
+    ) {
+      return {
+        paymentId: attempt.id,
+        provider: attempt.provider,
+        amount: Number(attempt.amount),
+        currency: attempt.currency,
+        status: attempt.status,
+        method: attempt.provider === PaymentProvider.ESEWA ? 'POST' : 'GET',
+        redirectUrl: attempt.checkoutUrl,
+        formFields:
+          attempt.provider === PaymentProvider.ESEWA
+            ? attempt.gatewayPayload
+            : undefined,
+      };
     }
-
-    return response;
+    if (attempt.status === TransactionStatus.SUCCEEDED)
+      return this.publicStatus(attempt);
+    throw new BadRequestException(
+      'Checkout is initializing or has ended; use a new request ID',
+    );
   }
 
-  async handleWebhook(
-    provider: PaymentProvider,
-    payload: unknown,
-    signature?: string,
-    rawBody?: Buffer,
-  ): Promise<any> {
-    if (provider === PaymentProvider.STRIPE) {
-      this.verifyStripeSignature(payload, signature, rawBody);
-    }
-
-    const gateway = this.gatewayFactory.resolve(provider);
-    const response = await gateway.handleWebhook(payload);
-
-    const existing = await this.transactionRepo.findOne({
-      where: { providerTransactionId: response.transactionId },
+  /** Authenticated polling endpoint; a browser return uses confirmReference instead. */
+  async getPaymentStatus(ownerId: number, paymentId: string) {
+    const attempt = await this.transactions.findOne({
+      where: { id: paymentId, ownerId },
     });
+    if (!attempt) throw new NotFoundException('Payment not found');
+    if (!attempt.providerTransactionId) {
+      return this.publicStatus(attempt);
+    }
+    return this.confirmReference(
+      attempt.provider,
+      attempt.providerTransactionId,
+    );
+  }
 
-    if (existing?.status === TransactionStatus.SUCCEEDED) {
-      return response;
+  /** Provider redirects are untrusted. They only identify an attempt to verify. */
+  async confirmReference(provider: PaymentProvider, reference: string) {
+    if (!reference) throw new BadRequestException('Missing payment reference');
+    const attempt = await this.transactions.findOne({
+      where: { provider, providerTransactionId: reference },
+    });
+    if (!attempt) throw new NotFoundException('Payment attempt not found');
+    if (attempt.status === TransactionStatus.SUCCEEDED) {
+      await this.redis.invalidateSubscription(attempt.businessId);
+      return this.publicStatus(attempt);
     }
 
-    if (!existing) {
-      await this.transactionRepo.save({
-        providerTransactionId: response.transactionId,
-        provider,
-        status: this.mapToTransactionStatus(response.status),
-        amount: response.amount,
-        currency: response.currency,
-        businessId: '',
-        customerId: '',
-        planId: 0,
-        idempotencyKey: response.transactionId,
-        gatewayPayload: response.rawResponse,
-      });
+    const result = await this.gateways
+      .resolve(provider)
+      .verifyPayment(reference, Number(attempt.amount));
+    this.assertProviderResult(attempt, result);
+
+    if (result.status === PaymentStatus.SUCCEEDED) {
+      await this.applyConfirmedPayment(attempt.id, result);
+      await this.redis.invalidateSubscription(attempt.businessId);
     } else {
-      await this.transactionRepo.update(existing.id, {
-        status: this.mapToTransactionStatus(response.status),
-        gatewayPayload: response.rawResponse,
-        completedAt:
-          response.status === PaymentStatus.SUCCEEDED ? new Date() : undefined,
+      await this.transactions.update(
+        { id: attempt.id, status: Not(TransactionStatus.SUCCEEDED) },
+        {
+          status: this.transactionStatus(result.status),
+          gatewayPayload: result.rawResponse,
+        },
+      );
+    }
+    const updated = await this.transactions.findOneByOrFail({ id: attempt.id });
+    return this.publicStatus(updated);
+  }
+
+  private assertProviderResult(
+    attempt: PaymentTransactionEntity,
+    result: PaymentResponse,
+  ) {
+    if (result.transactionId !== attempt.providerTransactionId) {
+      throw new BadGatewayException('Payment reference did not match');
+    }
+    if (
+      result.status === PaymentStatus.SUCCEEDED &&
+      (result.currency !== attempt.currency ||
+        !Number.isFinite(result.amount) ||
+        Math.round(result.amount * 100) !==
+          Math.round(Number(attempt.amount) * 100))
+    ) {
+      throw new BadGatewayException('Payment amount or currency did not match');
+    }
+  }
+
+  /** The row locks and status check make repeated callbacks safe. */
+  private async applyConfirmedPayment(
+    paymentId: string,
+    result: PaymentResponse,
+  ) {
+    await this.dataSource.transaction(async (manager) => {
+      const payment = await manager.findOne(PaymentTransactionEntity, {
+        where: { id: paymentId },
+        lock: { mode: 'pessimistic_write' },
       });
-    }
+      if (!payment || payment.status === TransactionStatus.SUCCEEDED) return;
 
-    if (response.status === PaymentStatus.SUCCEEDED && existing) {
-      await this.activateSubscription(existing);
-    }
+      // Serialize changes to subscriptions for the same business.
+      const business = await manager
+        .getRepository(BusinessEntity)
+        .createQueryBuilder('business')
+        .innerJoinAndSelect('business.owner', 'owner')
+        .setLock('pessimistic_write')
+        .where('business.business_id = :id', { id: payment.businessId })
+        .getOne();
+      if (!business) throw new NotFoundException('Business no longer exists');
+      if (business.owner.id !== payment.ownerId) {
+        throw new ForbiddenException(
+          'Business owner changed before payment confirmation',
+        );
+      }
+      const plan = await manager.findOneBy(PlanEntity, { id: payment.planId });
+      if (!plan) throw new NotFoundException('Plan no longer exists');
 
-    return response;
-  }
+      const current = await manager.findOne(BusinessSubscriptionEntity, {
+        where: {
+          businessId: payment.businessId,
+          status: SubscriptionStatus.ACTIVE,
+        },
+        order: { subscriptionId: 'DESC' },
+      });
+      const now = new Date();
+      let subscription: BusinessSubscriptionEntity;
 
-  private verifyStripeSignature(
-    payload: unknown,
-    signature?: string,
-    rawBody?: Buffer,
-  ): void {
-    if (!signature || !rawBody) {
-      throw new BadRequestException('Missing Stripe signature or raw body');
-    }
-
-    const stripeGateway = this.gatewayFactory.resolve(
-      PaymentProvider.STRIPE,
-    ) as any;
-    const webhookSecret = stripeGateway.getWebhookSecret?.();
-
-    if (!webhookSecret) {
-      throw new BadRequestException('Stripe webhook secret is not configured');
-    }
-
-    try {
-      const Stripe = require('stripe');
-      Stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
-    } catch (err) {
-      throw new BadRequestException(`Invalid Stripe signature: ${err.message}`);
-    }
-  }
-
-  private async activateSubscription(
-    tx: PaymentTransactionEntity,
-  ): Promise<void> {
-    if (!tx.subscriptionId) return;
-
-    const subscription = await this.subscriptionRepo.findOne({
-      where: { subscriptionId: tx.subscriptionId },
+      // Renewing the same paid plan preserves its unused time.
+      if (
+        current &&
+        current.planId === plan.id &&
+        current.endsAt &&
+        current.endsAt > now
+      ) {
+        const endsAt = this.addBillingCycle(current.endsAt, plan.billingCycle);
+        await manager.update(
+          BusinessSubscriptionEntity,
+          current.subscriptionId,
+          {
+            endsAt,
+            nextBillingDate: endsAt,
+            lastBillingDate: now,
+            nextPaymentAmount: plan.price,
+          },
+        );
+        subscription = current;
+      } else {
+        await manager.update(
+          BusinessSubscriptionEntity,
+          {
+            businessId: payment.businessId,
+            status: SubscriptionStatus.ACTIVE,
+          },
+          { status: SubscriptionStatus.INACTIVE },
+        );
+        const endsAt = this.addBillingCycle(now, plan.billingCycle);
+        subscription = await manager.save(
+          manager.create(BusinessSubscriptionEntity, {
+            businessId: payment.businessId,
+            planId: plan.id,
+            subscriptionType: plan.billingCycle,
+            status: SubscriptionStatus.ACTIVE,
+            startsAt: now,
+            endsAt,
+            lastBillingDate: now,
+            nextBillingDate: endsAt,
+            nextPaymentAmount: plan.price,
+          }),
+        );
+      }
+      await manager.update(PaymentTransactionEntity, payment.id, {
+        status: TransactionStatus.SUCCEEDED,
+        subscriptionId: subscription.subscriptionId,
+        gatewayPayload: result.rawResponse,
+        completedAt: now,
+      });
     });
-
-    if (!subscription) return;
-
-    const now = new Date();
-    await this.subscriptionRepo.update(tx.subscriptionId, {
-      status: SubscriptionStatus.ACTIVE,
-      lastBillingDate: now,
-      nextBillingDate: this.addMonths(now, 1),
-    });
   }
 
-  private buildIdempotencyKey(dto: {
-    businessId: string;
-    planId: number;
-    customerId: string;
-    paymentProvider: PaymentProvider;
-    subscriptionId?: number;
-  }): string {
-    return `${dto.businessId}:${dto.subscriptionId ?? 'onetime'}:${dto.planId}:${dto.paymentProvider}`;
+  private addBillingCycle(start: Date, cycle: PlanBillingCycle): Date {
+    const months =
+      cycle === PlanBillingCycle.YEARLY
+        ? 12
+        : cycle === PlanBillingCycle.QUARTERLY
+          ? 3
+          : 1;
+    const end = new Date(start);
+    const day = end.getUTCDate();
+    end.setUTCDate(1);
+    end.setUTCMonth(end.getUTCMonth() + months);
+    const lastDay = new Date(
+      Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0),
+    ).getUTCDate();
+    end.setUTCDate(Math.min(day, lastDay));
+    return end;
   }
 
-  private mapToTransactionStatus(status: PaymentStatus): TransactionStatus {
-    const map: Record<PaymentStatus, TransactionStatus> = {
-      [PaymentStatus.PENDING]: TransactionStatus.PENDING,
-      [PaymentStatus.SUCCEEDED]: TransactionStatus.SUCCEEDED,
-      [PaymentStatus.FAILED]: TransactionStatus.FAILED,
-      [PaymentStatus.CANCELLED]: TransactionStatus.CANCELLED,
-      [PaymentStatus.REFUNDED]: TransactionStatus.REFUNDED,
+  private transactionStatus(status: PaymentStatus): TransactionStatus {
+    switch (status) {
+      case PaymentStatus.SUCCEEDED:
+        return TransactionStatus.SUCCEEDED;
+      case PaymentStatus.FAILED:
+        return TransactionStatus.FAILED;
+      case PaymentStatus.CANCELLED:
+        return TransactionStatus.CANCELLED;
+      case PaymentStatus.REFUNDED:
+        return TransactionStatus.REFUNDED;
+      default:
+        return TransactionStatus.PENDING;
+    }
+  }
+
+  private publicStatus(attempt: PaymentTransactionEntity) {
+    return {
+      paymentId: attempt.id,
+      status: attempt.status,
     };
-    return map[status] ?? TransactionStatus.ERROR;
-  }
-
-  private addMonths(date: Date, months: number): Date {
-    const d = new Date(date);
-    d.setMonth(d.getMonth() + months);
-    return d;
   }
 }

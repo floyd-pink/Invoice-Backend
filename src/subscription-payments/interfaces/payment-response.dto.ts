@@ -14,4 +14,5 @@ export interface PaymentResponse {
   rawResponse?: Record<string, any>; //helps to handel the response from different payment providers
   nextAction?: 'REDIRECT' | 'POLL' | 'WEBHOOK';
   redirectUrl?: string;
+  formFields?: Record<string, string>;
 }

@@ -1,142 +1,69 @@
 import {
-  Controller,
-  Post,
+  BadRequestException,
   Body,
-  UseGuards,
-  Param,
-  Headers,
-  Req,
+  Controller,
   Get,
+  Param,
+  Post,
   Query,
 } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/common/guards/guards.module';
-import { SubscriptionPaymentsService } from './subscription-payments.service';
+import { ActiveUser } from 'src/common/decorators/active-user.decorator';
+import { Public } from 'src/common/decorators/public.decorator';
+import { SkipBusinessContext } from 'src/common/decorators/skip-business-context.decorator';
 import { InitiateSubscriptionPaymentDto } from './dto/subscription-payments.dto';
 import { PaymentProvider } from './enums/payment-provider.enum';
-import { PaymentStatus } from './interfaces/payment-response.dto';
-import { Request } from 'express';
+import { SubscriptionPaymentsService } from './subscription-payments.service';
 
 @Controller('subscription-payments')
 export class SubscriptionPaymentsController {
-  constructor(
-    private readonly subscriptionPaymentsService: SubscriptionPaymentsService,
-  ) {}
+  constructor(private readonly payments: SubscriptionPaymentsService) {}
 
+  // A scoped business token is not needed here: the service checks ownership in the DB.
+  @SkipBusinessContext()
   @Post('checkout')
-  @UseGuards(JwtAuthGuard)
-  async initiateCheckout(@Body() dto: InitiateSubscriptionPaymentDto) {
-    const response = await this.subscriptionPaymentsService.initiatePayment({
-      businessId: dto.businessId,
-      planId: dto.planId,
-      customerId: dto.customerId,
-      paymentProvider: dto.paymentProvider,
-      amount: dto.amount,
-      currency: dto.currency,
-      returnUrl: dto.returnUrl,
-      cancelUrl: dto.cancelUrl,
-      subscriptionId: dto.subscriptionId,
-    });
-
-    return {
-      success: true,
-      data: {
-        transactionId: response.transactionId,
-        status: response.status,
-        nextAction: response.nextAction,
-        redirectUrl: response.redirectUrl,
-      },
-    };
+  checkout(
+    @ActiveUser('sub') userId: string,
+    @Body() dto: InitiateSubscriptionPaymentDto,
+  ) {
+    return this.payments.startCheckout(Number(userId), dto);
   }
 
-  @Post('webhook/:provider')
-  async handleWebhook(
-    @Param('provider') provider: string,
-    @Headers('stripe-signature') stripeSignature: string,
-    @Req() req: Request & { rawBody?: Buffer },
-    @Body() payload: unknown,
+  @SkipBusinessContext()
+  @Get('status/:paymentId')
+  status(
+    @ActiveUser('sub') userId: string,
+    @Param('paymentId') paymentId: string,
   ) {
-    const paymentProvider = provider.toUpperCase() as PaymentProvider;
-
-    const response = await this.subscriptionPaymentsService.handleWebhook(
-      paymentProvider,
-      payload,
-      stripeSignature,
-      req.rawBody as Buffer,
-    );
-
-    return { received: true, transactionId: response.transactionId };
+    return this.payments.getPaymentStatus(Number(userId), paymentId);
   }
-  @Get('verify/:provider/:transactionId')
-  async verifyPayment(
-    @Param('provider') provider: string,
-    @Param('transactionId') transactionId: string,
-  ) {
-    const paymentProvider = provider.toUpperCase() as PaymentProvider;
-    const response = await this.subscriptionPaymentsService.verifyPayment(
-      paymentProvider,
-      transactionId,
-    );
-    return { success: true, data: response };
-  }
-  // src/subscription-payments/subscription-payments.controller.ts
 
-  @Get('success/:provider')
-  async esewaSuccess(
-    @Param('provider') provider: string,
-    @Query() query: Record<string, string>,
-  ) {
-    // eSewa sends the response as a base64-encoded query param or body
-    const paymentProvider = provider.toUpperCase() as PaymentProvider;
-    const response = await this.subscriptionPaymentsService.handleWebhook(
-      paymentProvider,
-      query.data, // eSewa sends the base64 payload as 'data' param
-    );
-
-    if (response.status === PaymentStatus.SUCCEEDED) {
-      return {
-        success: true,
-        message: 'Payment completed',
-        transactionId: response.transactionId,
-      };
+  // The browser carries only a reference. The service calls eSewa to verify it.
+  @Public()
+  @SkipBusinessContext()
+  @Get('return/esewa')
+  esewaReturn(@Query('data') data: string) {
+    if (!data) throw new BadRequestException('Missing eSewa response');
+    let reference: string;
+    try {
+      const decoded = JSON.parse(Buffer.from(data, 'base64').toString('utf8'));
+      reference = decoded.transaction_uuid;
+    } catch {
+      throw new BadRequestException('Invalid eSewa response');
     }
-    return {
-      success: false,
-      message: 'Payment failed',
-      transactionId: response.transactionId,
-    };
+    return this.payments.confirmReference(PaymentProvider.ESEWA, reference);
   }
 
-  @Get('failure/:provider')
-  async esewaFailure(@Param('provider') provider: string) {
-    return { success: false, message: 'Payment was cancelled or failed' };
+  @Public()
+  @SkipBusinessContext()
+  @Get('return/esewa/failure')
+  esewaFailure() {
+    return { status: 'PAYMENT_NOT_CONFIRMED' };
   }
 
-  // In subscription-payments.controller.ts
-
-  @Get('success/khalti')
-  async khaltiSuccess(@Query() query: Record<string, string>) {
-    // Khalti sends pidx, status, amount, transaction_id, etc. as query params
-    const response = await this.subscriptionPaymentsService.handleWebhook(
-      PaymentProvider.KHALTI,
-      query,
-    );
-
-    if (response.status === PaymentStatus.SUCCEEDED) {
-      return {
-        success: true,
-        message: 'Payment completed',
-        transactionId: response.transactionId,
-      };
-    }
-    return {
-      success: false,
-      message: 'Payment failed',
-      transactionId: response.transactionId,
-    };
-  }
-
-  @Get('failure/khalti')
-  async khaltiFailure(@Query() query: Record<string, string>) {
-    return { success: false, message: 'Payment was cancelled or failed' };
+  @Public()
+  @SkipBusinessContext()
+  @Get('return/khalti')
+  khaltiReturn(@Query('pidx') pidx: string) {
+    return this.payments.confirmReference(PaymentProvider.KHALTI, pidx);
   }
 }

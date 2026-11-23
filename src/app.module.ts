@@ -23,6 +23,7 @@ import { QuickSalesModule } from './quick-sales/quick-sales.module';
 
 import { BusinessContextGuard } from './common/guards/business-context.guard';
 import { SalesReportModule } from './sales-report/sales-report.module';
+import { SubscriptionPaymentsModule } from './subscription-payments/subscription-payments.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { SalesReportModule } from './sales-report/sales-report.module';
     PlansModule,
     GuardsModule,
     BusinessSubscriptionModule,
+    SubscriptionPaymentsModule,
     RedisModule,
     QuickSalesModule,
     SalesReportModule,

@@ -2,21 +2,46 @@ import { Injectable } from '@nestjs/common';
 import { PaymentProvider } from '../enums/payment-provider.enum';
 import { BasePaymentGateway } from './payment-gateway.abstract';
 import { PaymentRequest, PaymentResponse, PaymentStatus } from '../interfaces';
+import {
+  BadGatewayException,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class KhaltiGateway extends BasePaymentGateway {
   readonly provider = PaymentProvider.KHALTI;
 
-  private readonly baseUrl =
-    process.env.KHALTI_BASE_URL || 'https://dev.khalti.com/api/v2';
+  constructor(private readonly config: ConfigService) {
+    super();
+  }
+
+  private get baseUrl(): string {
+    const configured = this.config.get<string>('KHALTI_BASE_URL');
+    if (!configured && this.config.get<string>('NODE_ENV') === 'production') {
+      throw new InternalServerErrorException(
+        'KHALTI_BASE_URL is required in production',
+      );
+    }
+    return (configured || 'https://dev.khalti.com/api/v2').replace(/\/$/, '');
+  }
+
+  private get secretKey(): string {
+    const key = this.config.get<string>('KHALTI_SECRET_KEY');
+    if (!key)
+      throw new InternalServerErrorException(
+        'Khalti credentials are not configured',
+      );
+    return key;
+  }
 
   protected async doCreatePayment(
     request: PaymentRequest,
   ): Promise<PaymentResponse> {
-    const purchaseOrderId = `SUB-${request.businessId}-${Date.now()}`;
+    const purchaseOrderId = `SUB-${request.orderId}`;
     const payload = {
-      return_url: request.returnUrl || '',
-      website_url: process.env.KHALTI_WEBSITE_URL || 'http://localhost:3000',
+      return_url: request.returnUrl,
+      website_url: request.websiteUrl,
       amount: Math.round(request.amount * 100), // Convert to paisa
       purchase_order_id: purchaseOrderId,
       purchase_order_name: `Plan ${request.planId}`,
@@ -28,7 +53,7 @@ export class KhaltiGateway extends BasePaymentGateway {
     const response = await fetch(`${this.baseUrl}/epayment/initiate/`, {
       method: 'POST',
       headers: {
-        Authorization: `Key ${process.env.KHALTI_SECRET_KEY}`,
+        Authorization: `Key ${this.secretKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
@@ -36,14 +61,8 @@ export class KhaltiGateway extends BasePaymentGateway {
 
     const data = await response.json();
 
-    if (!response.ok || data.payment_url === undefined) {
-      return {
-        status: PaymentStatus.FAILED,
-        transactionId: purchaseOrderId,
-        amount: request.amount,
-        currency: request.currency,
-        rawResponse: data,
-      };
+    if (!response.ok || !data.payment_url || !data.pidx) {
+      throw new BadGatewayException('Khalti could not start the payment');
     }
 
     return {
@@ -60,12 +79,13 @@ export class KhaltiGateway extends BasePaymentGateway {
 
   protected async doVerifyPayment(
     transactionId: string,
+    _expectedAmount: number,
   ): Promise<PaymentResponse> {
     // transactionId here is the pidx
     const response = await fetch(`${this.baseUrl}/epayment/lookup/`, {
       method: 'POST',
       headers: {
-        Authorization: `Key ${process.env.KHALTI_SECRET_KEY}`,
+        Authorization: `Key ${this.secretKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -74,6 +94,12 @@ export class KhaltiGateway extends BasePaymentGateway {
     });
 
     const data = await response.json();
+    // Khalti can return HTTP 400 for an expired or cancelled payment.
+    if (!response.ok && !['Expired', 'User canceled'].includes(data.status)) {
+      throw new BadGatewayException(
+        `Khalti lookup failed (${response.status})`,
+      );
+    }
 
     const statusMap: Record<string, PaymentStatus> = {
       Completed: PaymentStatus.SUCCEEDED,
@@ -95,29 +121,7 @@ export class KhaltiGateway extends BasePaymentGateway {
     };
   }
 
-  protected async doHandleWebhook(payload: unknown): Promise<PaymentResponse> {
-    // Khalti doesn't have webhooks - they use redirect callbacks
-    // This method is called from our success endpoint when Khalti redirects back
-    const params = payload as Record<string, string>;
-
-    return {
-      status:
-        params.status === 'Completed'
-          ? PaymentStatus.SUCCEEDED
-          : PaymentStatus.FAILED,
-      transactionId: params.pidx,
-      gatewayReference: params.transaction_id,
-      amount: parseFloat(params.amount ?? '0') / 100,
-      currency: 'NPR',
-      rawResponse: params,
-    };
-  }
-
   supportsCurrency(currency: string): boolean {
     return currency.toUpperCase() === 'NPR';
-  }
-
-  protected override getSupportedCurrencies(): string[] {
-    return ['NPR'];
   }
 }
