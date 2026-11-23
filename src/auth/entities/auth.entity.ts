@@ -53,6 +53,9 @@ export class UserEntity {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ name: 'free_business_created', type: 'boolean', default: false })
+  freeBusinessCreated: boolean;
+
   @CreateDateColumn({ type: 'timestamp' })
   createdAt: Date;
 

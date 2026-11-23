@@ -9,12 +9,15 @@ import {
 import { PaymentProvider } from '../enums/payment-provider.enum';
 
 export enum TransactionStatus {
+  INITIATING = 'INITIATING',
   PENDING = 'PENDING',
   PROCESSING = 'PROCESSING',
   SUCCEEDED = 'SUCCEEDED',
   FAILED = 'FAILED',
   CANCELLED = 'CANCELLED',
   REFUNDED = 'REFUNDED',
+  PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
+  NEEDS_REVIEW = 'NEEDS_REVIEW',
   ERROR = 'ERROR',
 }
 
@@ -26,6 +29,10 @@ export enum TransactionStatus {
   unique: true,
 })
 @Index('UQ_PAYMENT_OWNER_REQUEST', ['ownerId', 'requestId'], { unique: true })
+@Index('UQ_PAYMENT_OPEN_BUSINESS', ['businessId'], {
+  unique: true,
+  where: `"status" IN ('INITIATING', 'PENDING', 'PROCESSING', 'NEEDS_REVIEW')`,
+})
 export class PaymentTransactionEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -64,6 +71,14 @@ export class PaymentTransactionEntity {
   @Column({ name: 'plan_id', type: 'int' })
   planId: number;
 
+  @Column({
+    name: 'billing_cycle',
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
+  billingCycle: string | null;
+
   @Column({ name: 'owner_id', type: 'int' })
   ownerId: number;
 
@@ -82,6 +97,15 @@ export class PaymentTransactionEntity {
   @Column({ name: 'retry_count', type: 'int', default: 0 })
   retryCount: number;
 
+  @Column({ name: 'next_check_at', type: 'timestamp', nullable: true })
+  nextCheckAt: Date | null;
+
+  @Column({ name: 'last_checked_at', type: 'timestamp', nullable: true })
+  lastCheckedAt: Date | null;
+
+  @Column({ name: 'check_attempts', type: 'int', default: 0 })
+  checkAttempts: number;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
@@ -90,4 +114,10 @@ export class PaymentTransactionEntity {
 
   @Column({ name: 'completed_at', type: 'timestamp', nullable: true })
   completedAt: Date | null;
+
+  @Column({ name: 'grant_starts_at', type: 'timestamp', nullable: true })
+  grantStartsAt: Date | null;
+
+  @Column({ name: 'grant_ends_at', type: 'timestamp', nullable: true })
+  grantEndsAt: Date | null;
 }

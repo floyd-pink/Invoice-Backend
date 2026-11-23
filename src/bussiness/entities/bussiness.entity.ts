@@ -22,6 +22,16 @@ export class BusinessEntity {
   @Index('IDX_BUSINESS_PAN', { unique: true })
   panNumber: string;
 
+  @Column({ name: 'is_active', type: 'boolean', default: true })
+  isActive: boolean;
+
+  @Column({
+    name: 'requires_paid_subscription',
+    type: 'boolean',
+    default: false,
+  })
+  requiresPaidSubscription: boolean;
+
   @Column({
     type: 'decimal',
     precision: 10,
@@ -35,7 +45,7 @@ export class BusinessEntity {
   createdAt: Date;
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
-  
+
   @ManyToOne(() => UserEntity, (user) => user.businesses, {
     onDelete: 'CASCADE',
   })
