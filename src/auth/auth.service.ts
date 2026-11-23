@@ -76,7 +76,7 @@ export class AuthService {
     }
 
     const businesses = await this.businessRepository.find({
-      where: { owner: { id: user.id } },
+      where: { owner: { id: user.id }, isActive: true },
       select: { business_id: true, business_name: true },
     });
     const tokenPayload = {

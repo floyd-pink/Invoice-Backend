@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { RedisModule } from 'src/common/redis/redis.module';
 import { PlanEnforcementService } from './plan-enforcement.service';
 import { InvoiceEntity } from 'src/invoice_items/entities/invoice.entity';
 import { BusinessSubscriptionEntity } from './../business-subscription/entities/business-subscription.entity';
@@ -15,7 +14,6 @@ import { QuickSalesEntity } from 'src/quick-sales/entities/quickSales.entity';
       BusinessCustomer,
       QuickSalesEntity,
     ]),
-    RedisModule,
   ],
   providers: [PlanEnforcementService],
   exports: [PlanEnforcementService],

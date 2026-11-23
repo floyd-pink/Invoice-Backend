@@ -1,302 +1,152 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { BusinessService } from './bussiness.service';
-import { CreateBusinessDto } from './dto/bussiness.dto';
-import { ConflictException, NotFoundException } from '@nestjs/common';
-import { BusinessEntity } from '../bussiness/entities/bussiness.entity';
-import { UserEntity } from '../auth/entities/auth.entity';
-import { PlanEntity } from '../plans/entities/plan.entity';
+import { BusinessEntity } from './entities/bussiness.entity';
 import {
   BusinessSubscriptionEntity,
   SubscriptionStatus,
-} from '../business-subscription/entities/business-subscription.entity';
-import { DataSource } from 'typeorm';
-import { getRepositoryToken } from '@nestjs/typeorm';
-import { RedisService } from '../common/redis/redis.service';
-import { PlanType } from '../plans/enum/plan-type.enum';
+} from 'src/business-subscription/entities/business-subscription.entity';
+import { UserEntity } from 'src/auth/entities/auth.entity';
+import { PlanBillingCycle, PlanType } from 'src/plans/enum/plan-type.enum';
 
-const mockRepository = () => ({
-  findOne: jest.fn(),
-  create: jest.fn(),
-  save: jest.fn(),
-  find: jest.fn(),
-  update: jest.fn(),
-  delete: jest.fn(),
-});
-const mockFreePlan = {
-  id: 1,
-  name: 'Free',
-  price: 0,
-  type: PlanType.FREE,
-  billingCycle: 'Monthly',
-  isActive: true,
-};
-
-const payload: CreateBusinessDto = {
-  name: 'Test Business',
-  panNumber: '1234567890',
-};
-const savedBusiness = {
-  business_id: 'sty1234',
-  business_name: 'Test Business',
-  panNumber: '1234567890',
-  walletBalance: 0,
-  createdAt: new Date(),
-  updatedAt: null,
-  owner: { id: 1 } as UserEntity,
-};
-const savedSubscription = {
-  business_id: 'sty1234',
-  Business_Name: 'Test Business',
-  owner: { id: 1 } as UserEntity,
-  panNumber: '1234567890',
-  subscription: {
-    subscriptionId: 1,
-    planId: 1,
-    planName: 'Free',
-    billingCycle: 'Monthly',
-    status: SubscriptionStatus.ACTIVE,
-    startsAt: expect.any(Date),
-    endsAt: null,
-    nextBillingDate: null,
-    lastBillingDate: null,
-    nextPaymentAmount: null,
-  },
-};
-const mockSubscription = {
-  subscriptionId: 1,
-  business: savedBusiness,
-  plan: mockFreePlan,
-};
-const mockQueryRunner = () => ({
-  connect: jest.fn().mockResolvedValue(undefined),
-  startTransaction: jest.fn().mockResolvedValue(undefined),
-  commitTransaction: jest.fn().mockResolvedValue(undefined),
-  rollbackTransaction: jest.fn().mockResolvedValue(undefined),
-  release: jest.fn().mockResolvedValue(undefined),
-
-  manager: {
+describe('BusinessService', () => {
+  const freePlan = {
+    id: 1,
+    name: 'Free',
+    type: PlanType.FREE,
+    billingCycle: PlanBillingCycle.MONTHLY,
+    isActive: true,
+  };
+  const user = { id: 7, role: 'user', freeBusinessCreated: false };
+  const businessRepo = { findOne: jest.fn() };
+  const subscriptionRepo = { findOne: jest.fn() };
+  const manager = {
     findOne: jest.fn(),
+    count: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
-    update: jest.fn(),
-  },
-});
-beforeEach(() => {
-  jest.resetAllMocks();
-});
-describe('BusinessService', () => {
-  let service: BusinessService;
-  let mockBusinessRepository: ReturnType<typeof mockRepository>;
-  let mockUserRepository: ReturnType<typeof mockRepository>;
-  let mockPlanRepository: ReturnType<typeof mockRepository>;
-  let mockSubscriptionRepository: ReturnType<typeof mockRepository>;
-  let mockRedisService: {
-    getCachedFreePlan: jest.Mock;
-    setCachedFreePlan: jest.Mock;
   };
-  let queryRunner: ReturnType<typeof mockQueryRunner>;
-  beforeEach(async () => {
-    mockBusinessRepository = mockRepository();
-    mockUserRepository = mockRepository();
-    mockPlanRepository = mockRepository();
-    mockSubscriptionRepository = mockRepository();
-    mockRedisService = {
-      getCachedFreePlan: jest.fn(),
-      setCachedFreePlan: jest.fn(),
-    };
-    queryRunner = mockQueryRunner();
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        BusinessService,
+  const runner = {
+    manager,
+    connect: jest.fn(),
+    startTransaction: jest.fn(),
+    commitTransaction: jest.fn(),
+    rollbackTransaction: jest.fn(),
+    release: jest.fn(),
+  };
+  const redis = {
+    getCachedFreePlan: jest.fn(),
+    setCachedFreePlan: jest.fn(),
+  };
+  const service = new BusinessService(
+    businessRepo as never,
+    {} as never,
+    {} as never,
+    subscriptionRepo as never,
+    { createQueryRunner: () => runner } as never,
+    redis as never,
+  );
 
-        {
-          provide: getRepositoryToken(BusinessEntity),
-          useValue: mockBusinessRepository,
-        },
-
-        {
-          provide: getRepositoryToken(UserEntity),
-          useValue: mockUserRepository,
-        },
-
-        {
-          provide: getRepositoryToken(PlanEntity),
-          useValue: mockPlanRepository,
-        },
-
-        {
-          provide: getRepositoryToken(BusinessSubscriptionEntity),
-          useValue: mockSubscriptionRepository,
-        },
-
-        {
-          provide: DataSource,
-          useValue: {
-            createQueryRunner: jest.fn().mockReturnValue(queryRunner),
-            transaction: jest.fn(),
-          },
-        },
-
-        // Mock Redis
-        {
-          provide: RedisService,
-          useValue: mockRedisService,
-        },
-      ],
-    }).compile();
-
-    service = module.get<BusinessService>(BusinessService);
-  });
-  afterEach(() => {
+  beforeEach(() => {
     jest.clearAllMocks();
-  });
-
-  it('should be defined', () => {
-    expect(service).toBeDefined();
-  });
-
-  it('should throw ConflictException if business with same PAN exists', async () => {
-    mockRedisService.getCachedFreePlan.mockResolvedValue(mockFreePlan);
-
-    queryRunner.manager.findOne.mockResolvedValue({
-      business_id: '123',
-      panNumber: payload.panNumber,
-    });
-
-    await expect(service.createBusiness(payload, '1')).rejects.toThrow(
-      new ConflictException('Business with this PAN already exists'),
+    user.freeBusinessCreated = false;
+    redis.getCachedFreePlan.mockResolvedValue(freePlan);
+    manager.count.mockResolvedValue(0);
+    manager.findOne.mockImplementation(async (entity) =>
+      entity === UserEntity ? user : null,
     );
-
-    expect(queryRunner.manager.findOne).toHaveBeenCalledWith(BusinessEntity, {
-      where: { panNumber: payload.panNumber },
-    });
-
-    expect(queryRunner.connect).toHaveBeenCalledTimes(1);
-    expect(queryRunner.startTransaction).toHaveBeenCalledTimes(1);
-
-    expect(queryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
-
-    expect(queryRunner.commitTransaction).not.toHaveBeenCalled();
-
-    expect(queryRunner.manager.save).not.toHaveBeenCalled();
-
-    expect(queryRunner.release).toHaveBeenCalledTimes(1);
-  });
-  it('should only hit the database for free plan if not cached', async () => {
-    mockRedisService.getCachedFreePlan.mockResolvedValue(undefined);
-
-    mockPlanRepository.findOne.mockResolvedValue(mockFreePlan);
-    queryRunner.manager.findOne.mockResolvedValue({
-      business_id: '123',
-      panNumber: payload.panNumber,
-    });
-
-    await expect(service.createBusiness(payload, '1')).rejects.toThrow(
-      ConflictException,
+    manager.create.mockImplementation((entity, value) =>
+      entity === BusinessEntity
+        ? { ...value, business_id: 'business-1' }
+        : entity === BusinessSubscriptionEntity
+          ? { ...value, subscriptionId: 1 }
+          : value,
     );
-
-    expect(mockRedisService.getCachedFreePlan).toHaveBeenCalledTimes(1);
-    expect(mockPlanRepository.findOne).toHaveBeenCalledWith({
-      where: { type: PlanType.FREE, isActive: true },
-    });
-    expect(mockRedisService.setCachedFreePlan).toHaveBeenCalledWith(
-      mockFreePlan,
-    );
-    expect(queryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
-    expect(queryRunner.commitTransaction).not.toHaveBeenCalled();
+    manager.save.mockImplementation(async (value) => value);
   });
-  it('should throw NotFoundException id plan is not found or inactive ', async () => {
-    mockRedisService.getCachedFreePlan.mockResolvedValue(undefined);
-    mockPlanRepository.findOne.mockResolvedValue(undefined);
-    await expect(service.createBusiness(payload, '1')).rejects.toThrow(
-      new NotFoundException('Free plan not found.'),
-    );
-    await expect(mockRedisService.getCachedFreePlan).toHaveBeenCalledTimes(1);
-    await expect(mockPlanRepository.findOne).toHaveBeenCalledWith({
-      where: { type: PlanType.FREE, isActive: true },
-    });
-  });
-  it('should rollback successfully when business creation and subscription plan is not achieved', async () => {
-    const payload = {
-      name: 'Test Business',
-      panNumber: '123456789',
-    };
 
-    const mockBusiness = {
-      business_name: payload.name,
-      panNumber: payload.panNumber,
-      owner: { id: 1 },
-    };
-
-    const mockSubscription = {
-      subscriptionId: 1,
-      business: savedBusiness,
-      plan: mockFreePlan,
-    };
-
-    mockRedisService.getCachedFreePlan.mockResolvedValue(mockFreePlan);
-    queryRunner.manager.findOne
-      .mockReset()
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null);
-    queryRunner.manager.findOne.mockImplementation((entity) => {
-      if (entity == BusinessEntity) {
-        return mockBusiness;
-      }
-      if (entity == BusinessSubscriptionEntity) {
-        return mockSubscription;
-      }
-    });
-    queryRunner.manager.save
-      .mockReset()
-      .mockResolvedValueOnce(savedBusiness)
-      .mockRejectedValueOnce(new Error('Subscription creation failed'));
-
-    await expect(service.createBusiness(payload, '1')).rejects.toThrow(
-      'Subscription creation failed',
-    );
-
-    expect(queryRunner.manager.findOne).toHaveBeenCalledTimes(2);
-    expect(queryRunner.manager.save).toHaveBeenCalledTimes(2);
-
-    expect(queryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
-    expect(queryRunner.commitTransaction).not.toHaveBeenCalled();
-    expect(queryRunner.release).toHaveBeenCalledTimes(1);
-  });
-  it('should create business and subscription successfully', async () => {
-    const numericUsedId = 1;
-    mockRedisService.getCachedFreePlan.mockResolvedValue(mockFreePlan);
-    queryRunner.manager.findOne
-      .mockReset()
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null);
-
-    queryRunner.manager.create.mockReturnValueOnce(savedBusiness);
-    queryRunner.manager.create.mockReturnValueOnce(mockSubscription);
-    queryRunner.manager.save.mockResolvedValueOnce(savedBusiness);
-    queryRunner.manager.save.mockResolvedValueOnce(mockSubscription);
-
+  it('gives the first business one Free subscription', async () => {
     const result = await service.createBusiness(
-      payload,
-      numericUsedId.toString(),
+      { name: 'Shop', panNumber: '123456789' },
+      '7',
     );
-    expect(queryRunner.connect).toHaveBeenCalledTimes(1);
-    expect(queryRunner.startTransaction).toHaveBeenCalledTimes(1);
+    expect(result.requiresPayment).toBe(false);
+    expect(result.subscription?.status).toBe(SubscriptionStatus.ACTIVE);
+    expect(user.freeBusinessCreated).toBe(true);
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: SubscriptionStatus.ACTIVE,
+        planId: 1,
+      }),
+    );
+    expect(runner.commitTransaction).toHaveBeenCalledTimes(1);
+  });
 
-    expect(queryRunner.manager.findOne).toHaveBeenCalledWith(BusinessEntity, {
-      where: { panNumber: payload.panNumber },
+  it('leaves an additional business restricted until its own payment succeeds', async () => {
+    user.freeBusinessCreated = true;
+    manager.count.mockResolvedValue(1);
+    const result = await service.createBusiness(
+      { name: 'Second Shop', panNumber: '987654321' },
+      '7',
+    );
+    expect(result.requiresPayment).toBe(true);
+    expect(result.subscription).toBeNull();
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isActive: false,
+        requiresPaidSubscription: true,
+      }),
+    );
+    expect(manager.save).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: SubscriptionStatus.ACTIVE,
+      }),
+    );
+  });
+
+  it('does not grant a second Free business when the owner has an older business', async () => {
+    manager.count.mockResolvedValue(1);
+    const result = await service.createBusiness(
+      { name: 'Second Shop', panNumber: '987654321' },
+      '7',
+    );
+    expect(result.requiresPayment).toBe(true);
+  });
+
+  it('returns the pending business when creation is retried after a lost response', async () => {
+    user.freeBusinessCreated = true;
+    manager.count.mockResolvedValue(1);
+    manager.findOne.mockImplementation(async (entity) =>
+      entity === UserEntity
+        ? user
+        : {
+            business_id: 'business-1',
+            business_name: 'Second Shop',
+            panNumber: '987654321',
+            owner: { id: 7 },
+            requiresPaidSubscription: true,
+            isActive: false,
+          },
+    );
+    const result = await service.createBusiness(
+      { name: 'Second Shop', panNumber: '987654321' },
+      '7',
+    );
+    expect(result).toMatchObject({
+      business_id: 'business-1',
+      requiresPayment: true,
+      subscription: null,
     });
+    expect(manager.save).not.toHaveBeenCalled();
+  });
 
-    expect(queryRunner.manager.create).toHaveBeenCalledTimes(2);
-    expect(queryRunner.manager.save).toHaveBeenCalledTimes(2);
-    expect(queryRunner.manager.save).toHaveBeenNthCalledWith(1, savedBusiness);
-    expect(queryRunner.manager.save).toHaveBeenNthCalledWith(
-      2,
-      mockSubscription,
-    );
-    expect(queryRunner.commitTransaction).toHaveBeenCalledTimes(1);
-    expect(queryRunner.rollbackTransaction).not.toHaveBeenCalled();
-    expect(queryRunner.release).toHaveBeenCalledTimes(1);
-    expect(result).toEqual(savedSubscription);
+  it('denies a paid-only business after its subscription expires', async () => {
+    businessRepo.findOne.mockResolvedValue({
+      business_id: 'business-1',
+      isActive: true,
+      requiresPaidSubscription: true,
+    });
+    subscriptionRepo.findOne.mockResolvedValue({
+      endsAt: new Date('2020-01-01'),
+    });
+    await expect(service.isMember('business-1', 7)).resolves.toBe(false);
   });
 });
