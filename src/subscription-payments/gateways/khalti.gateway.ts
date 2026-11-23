@@ -5,6 +5,7 @@ import { PaymentRequest, PaymentResponse, PaymentStatus } from '../interfaces';
 import {
   BadGatewayException,
   InternalServerErrorException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -23,7 +24,23 @@ export class KhaltiGateway extends BasePaymentGateway {
         'KHALTI_BASE_URL is required in production',
       );
     }
-    return (configured || 'https://dev.khalti.com/api/v2').replace(/\/$/, '');
+    const value = (configured || 'https://dev.khalti.com/api/v2').replace(
+      /\/$/,
+      '',
+    );
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new InternalServerErrorException('KHALTI_BASE_URL is invalid');
+    }
+    if (
+      this.config.get<string>('NODE_ENV') === 'production' &&
+      parsed.protocol !== 'https:'
+    ) {
+      throw new InternalServerErrorException('KHALTI_BASE_URL must use HTTPS');
+    }
+    return value;
   }
 
   private get secretKey(): string {
@@ -50,19 +67,50 @@ export class KhaltiGateway extends BasePaymentGateway {
         email: request.customerEmail,
       },
     };
-    const response = await fetch(`${this.baseUrl}/epayment/initiate/`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Key ${this.secretKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/epayment/initiate/`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          Authorization: `Key ${this.secretKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'Khalti initiation is temporarily unavailable',
+      );
+    }
+    let data: Record<string, unknown>;
+    try {
+      const parsed: unknown = await response.json();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Invalid response');
+      }
+      data = parsed as Record<string, unknown>;
+    } catch {
+      throw new BadGatewayException(
+        'Khalti returned an invalid initiation response',
+      );
+    }
 
-    const data = await response.json();
-
-    if (!response.ok || !data.payment_url || !data.pidx) {
+    if (
+      !response.ok ||
+      typeof data.payment_url !== 'string' ||
+      typeof data.pidx !== 'string'
+    ) {
       throw new BadGatewayException('Khalti could not start the payment');
+    }
+    let paymentUrl: URL;
+    try {
+      paymentUrl = new URL(data.payment_url);
+    } catch {
+      throw new BadGatewayException('Khalti returned an invalid payment URL');
+    }
+    if (paymentUrl.protocol !== 'https:') {
+      throw new BadGatewayException('Khalti returned an insecure payment URL');
     }
 
     return {
@@ -79,24 +127,44 @@ export class KhaltiGateway extends BasePaymentGateway {
 
   protected async doVerifyPayment(
     transactionId: string,
-    _expectedAmount: number,
   ): Promise<PaymentResponse> {
     // transactionId here is the pidx
-    const response = await fetch(`${this.baseUrl}/epayment/lookup/`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Key ${this.secretKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        pidx: transactionId,
-      }),
-    });
-
-    const data = await response.json();
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/epayment/lookup/`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          Authorization: `Key ${this.secretKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ pidx: transactionId }),
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'Khalti lookup is temporarily unavailable',
+      );
+    }
+    let data: Record<string, unknown>;
+    try {
+      const parsed: unknown = await response.json();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Invalid response');
+      }
+      data = parsed as Record<string, unknown>;
+    } catch {
+      throw new BadGatewayException(
+        'Khalti returned an invalid lookup response',
+      );
+    }
+    if (typeof data.pidx !== 'string' || typeof data.status !== 'string') {
+      throw new BadGatewayException(
+        'Khalti returned an invalid lookup response',
+      );
+    }
     // Khalti can return HTTP 400 for an expired or cancelled payment.
     if (!response.ok && !['Expired', 'User canceled'].includes(data.status)) {
-      throw new BadGatewayException(
+      throw new ServiceUnavailableException(
         `Khalti lookup failed (${response.status})`,
       );
     }
@@ -108,14 +176,18 @@ export class KhaltiGateway extends BasePaymentGateway {
       Expired: PaymentStatus.FAILED,
       'User canceled': PaymentStatus.CANCELLED,
       Refunded: PaymentStatus.REFUNDED,
-      'Partially Refunded': PaymentStatus.REFUNDED,
+      'Partially Refunded': PaymentStatus.PARTIALLY_REFUNDED,
+      'Partially refunded': PaymentStatus.PARTIALLY_REFUNDED,
     };
 
     return {
-      status: statusMap[data.status] ?? PaymentStatus.FAILED,
+      status: statusMap[data.status] ?? PaymentStatus.UNKNOWN,
       transactionId: data.pidx,
-      gatewayReference: data.transaction_id,
-      amount: (data.total_amount ?? 0) / 100, // Convert paisa to main unit
+      gatewayReference:
+        typeof data.transaction_id === 'string'
+          ? data.transaction_id
+          : undefined,
+      amount: Number(data.total_amount ?? 0) / 100, // Convert paisa to main unit
       currency: 'NPR',
       rawResponse: data,
     };

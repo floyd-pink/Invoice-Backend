@@ -4,6 +4,8 @@ export enum PaymentStatus {
   FAILED = 'FAILED',
   CANCELLED = 'CANCELLED',
   REFUNDED = 'REFUNDED',
+  PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
+  UNKNOWN = 'UNKNOWN',
 }
 export interface PaymentResponse {
   status: PaymentStatus;

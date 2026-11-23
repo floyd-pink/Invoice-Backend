@@ -9,7 +9,9 @@ import {
 import * as crypto from 'crypto';
 import {
   BadGatewayException,
+  BadRequestException,
   InternalServerErrorException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 @Injectable()
@@ -18,6 +20,71 @@ export class EsewaGateway extends BasePaymentGateway {
 
   constructor(private readonly config: ConfigService) {
     super();
+  }
+
+  /** Check eSewa's signed browser return before using its transaction UUID. */
+  verifiedReturnReference(encoded: string): string {
+    let data: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(
+        Buffer.from(encoded, 'base64').toString('utf8'),
+      );
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Invalid response');
+      }
+      data = parsed as Record<string, unknown>;
+    } catch {
+      throw new BadRequestException('Invalid eSewa response');
+    }
+    const names = data?.signed_field_names;
+    const signature = data?.signature;
+    const secret = this.config.get<string>('ESEWA_SECRET_KEY');
+    const productCode = this.config.get<string>('ESEWA_PRODUCT_CODE');
+    if (!secret || !productCode) {
+      throw new InternalServerErrorException(
+        'eSewa credentials are not configured',
+      );
+    }
+    if (
+      typeof names !== 'string' ||
+      typeof signature !== 'string' ||
+      typeof data.transaction_uuid !== 'string' ||
+      !/^SUB-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        data.transaction_uuid,
+      ) ||
+      data.product_code !== productCode
+    ) {
+      throw new BadRequestException('Invalid eSewa response');
+    }
+    const fields = names.split(',');
+    if (
+      new Set(fields).size !== fields.length ||
+      !['transaction_uuid', 'product_code', 'total_amount', 'status'].every(
+        (name) => fields.includes(name),
+      ) ||
+      fields.some(
+        (name) =>
+          !/^[a-z_]+$/.test(name) ||
+          (typeof data[name] !== 'string' && typeof data[name] !== 'number'),
+      )
+    ) {
+      throw new BadRequestException('Invalid eSewa signed fields');
+    }
+    const message = fields
+      .map((name) => `${name}=${String(data[name])}`)
+      .join(',');
+    const expected = crypto
+      .createHmac('sha256', secret)
+      .update(message)
+      .digest();
+    const received = Buffer.from(signature, 'base64');
+    if (
+      received.length !== expected.length ||
+      !crypto.timingSafeEqual(received, expected)
+    ) {
+      throw new BadRequestException('Invalid eSewa signature');
+    }
+    return data.transaction_uuid;
   }
 
   private get formBaseUrl(): string {
@@ -35,16 +102,27 @@ export class EsewaGateway extends BasePaymentGateway {
         `${key} is required in production`,
       );
     }
-    return (
+    const value = (
       configured ||
       this.config.get<string>('ESEWA_BASE_URL') ||
       'https://rc.esewa.com.np'
     ).replace(/\/$/, '');
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new InternalServerErrorException(`${key} is invalid`);
+    }
+    if (
+      this.config.get<string>('NODE_ENV') === 'production' &&
+      parsed.protocol !== 'https:'
+    ) {
+      throw new InternalServerErrorException(`${key} must use HTTPS`);
+    }
+    return value;
   }
 
-  protected async doCreatePayment(
-    request: PaymentRequest,
-  ): Promise<PaymentResponse> {
+  protected doCreatePayment(request: PaymentRequest): Promise<PaymentResponse> {
     const transactionUuid = `SUB-${request.orderId}`;
 
     const secretKey = this.config.get<string>('ESEWA_SECRET_KEY');
@@ -76,7 +154,7 @@ export class EsewaGateway extends BasePaymentGateway {
       success_url: request.returnUrl,
       failure_url: request.cancelUrl,
     };
-    return {
+    return Promise.resolve({
       status: PaymentStatus.PENDING,
       transactionId: transactionUuid,
       amount: request.amount,
@@ -85,7 +163,7 @@ export class EsewaGateway extends BasePaymentGateway {
       redirectUrl: `${this.formBaseUrl}/api/epay/main/v2/form`,
       formFields,
       rawResponse: formFields,
-    };
+    });
   }
 
   protected async doVerifyPayment(
@@ -102,12 +180,32 @@ export class EsewaGateway extends BasePaymentGateway {
     url.searchParams.set('product_code', productCode);
     url.searchParams.set('total_amount', expectedAmount.toFixed(2));
 
-    const response = await fetch(url.toString());
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), {
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'eSewa status is temporarily unavailable',
+      );
+    }
     if (!response.ok)
-      throw new BadGatewayException(
+      throw new ServiceUnavailableException(
         `eSewa status check failed (${response.status})`,
       );
-    const data = await response.json(); //this is the response from api call to esewa
+    let data: Record<string, unknown>;
+    try {
+      const parsed: unknown = await response.json();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Invalid response');
+      }
+      data = parsed as Record<string, unknown>;
+    } catch {
+      throw new BadGatewayException(
+        'eSewa returned an invalid status response',
+      );
+    }
     if (
       data.transaction_uuid !== transactionId ||
       data.product_code !== productCode
@@ -121,14 +219,23 @@ export class EsewaGateway extends BasePaymentGateway {
       CANCELED: PaymentStatus.CANCELLED,
       NOT_FOUND: PaymentStatus.FAILED,
       FULL_REFUND: PaymentStatus.REFUNDED,
-      PARTIAL_REFUND: PaymentStatus.REFUNDED,
-      AMBIGUOUS: PaymentStatus.FAILED,
+      PARTIAL_REFUND: PaymentStatus.PARTIALLY_REFUNDED,
+      AMBIGUOUS: PaymentStatus.UNKNOWN,
     };
+    const rawAmount = data.total_amount;
+    const amount =
+      typeof rawAmount === 'string' || typeof rawAmount === 'number'
+        ? Number(String(rawAmount).replace(/,/g, ''))
+        : Number.NaN;
     return {
-      status: statusMap[data.status] || PaymentStatus.FAILED,
+      status:
+        typeof data.status === 'string'
+          ? statusMap[data.status] || PaymentStatus.UNKNOWN
+          : PaymentStatus.UNKNOWN,
       transactionId,
-      gatewayReference: data.ref_id,
-      amount: Number(String(data.total_amount ?? '0').replace(/,/g, '')),
+      gatewayReference:
+        typeof data.ref_id === 'string' ? data.ref_id : undefined,
+      amount,
       currency: 'NPR',
       rawResponse: data,
     };
