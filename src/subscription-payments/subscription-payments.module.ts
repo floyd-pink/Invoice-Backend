@@ -9,11 +9,11 @@ import { PlanEntity } from 'src/plans/entities/plan.entity';
 import { BusinessEntity } from 'src/bussiness/entities/bussiness.entity';
 import { BusinessSubscriptionEntity } from 'src/business-subscription/entities/business-subscription.entity';
 import { KhaltiGateway } from './gateways/khalti.gateway';
-import { RedisModule } from 'src/common/redis/redis.module';
+import { PaymentReconciliationService } from './payment-reconciliation.service';
+import { PaymentConfigurationValidator } from './payment-configuration.validator';
 
 @Module({
   imports: [
-    RedisModule,
     TypeOrmModule.forFeature([
       PaymentTransactionEntity,
       PlanEntity,
@@ -24,6 +24,8 @@ import { RedisModule } from 'src/common/redis/redis.module';
   controllers: [SubscriptionPaymentsController],
   providers: [
     SubscriptionPaymentsService,
+    PaymentConfigurationValidator,
+    PaymentReconciliationService,
     PaymentGatewayFactory,
     EsewaGateway,
     KhaltiGateway,

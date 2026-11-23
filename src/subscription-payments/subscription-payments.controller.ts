@@ -13,10 +13,14 @@ import { SkipBusinessContext } from 'src/common/decorators/skip-business-context
 import { InitiateSubscriptionPaymentDto } from './dto/subscription-payments.dto';
 import { PaymentProvider } from './enums/payment-provider.enum';
 import { SubscriptionPaymentsService } from './subscription-payments.service';
+import { EsewaGateway } from './gateways/esewa.gateway';
 
 @Controller('subscription-payments')
 export class SubscriptionPaymentsController {
-  constructor(private readonly payments: SubscriptionPaymentsService) {}
+  constructor(
+    private readonly payments: SubscriptionPaymentsService,
+    private readonly esewa: EsewaGateway,
+  ) {}
 
   // A scoped business token is not needed here: the service checks ownership in the DB.
   @SkipBusinessContext()
@@ -43,13 +47,7 @@ export class SubscriptionPaymentsController {
   @Get('return/esewa')
   esewaReturn(@Query('data') data: string) {
     if (!data) throw new BadRequestException('Missing eSewa response');
-    let reference: string;
-    try {
-      const decoded = JSON.parse(Buffer.from(data, 'base64').toString('utf8'));
-      reference = decoded.transaction_uuid;
-    } catch {
-      throw new BadRequestException('Invalid eSewa response');
-    }
+    const reference = this.esewa.verifiedReturnReference(data);
     return this.payments.confirmReference(PaymentProvider.ESEWA, reference);
   }
 
