@@ -1,18 +1,14 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { ContactController } from './contact.controller';
+import { ContactService } from './contact.service';
 
 describe('ContactController', () => {
-  let controller: ContactController;
-
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [ContactController],
-    }).compile();
-
-    controller = module.get<ContactController>(ContactController);
-  });
-
-  it('should be defined', () => {
-    expect(controller).toBeDefined();
+  it('returns the contact service response', () => {
+    const response = { message: 'Contact information' };
+    const provideContact = jest.fn().mockReturnValue(response);
+    const controller = new ContactController({
+      provideContact,
+    } as unknown as ContactService);
+    expect(controller.provideContact()).toEqual(response);
+    expect(provideContact).toHaveBeenCalledTimes(1);
   });
 });

@@ -15,8 +15,10 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+    it('returns the configured welcome message', () => {
+      expect(appController.getHello()).toBe(
+        'Welcome to Mine Server! (Aarogya Chaulagain)',
+      );
     });
   });
 });
