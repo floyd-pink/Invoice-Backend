@@ -28,6 +28,10 @@ import { PaymentProvider } from './enums/payment-provider.enum';
 import { PaymentGatewayFactory } from './factories/payment-gateway.factory';
 import { PaymentRequest, PaymentResponse, PaymentStatus } from './interfaces';
 
+const ESEWA_FIRST_CHECK_MS = 5 * 60_000;
+const KHALTI_FIRST_CHECK_MS = 2 * 60_000;
+const STATUS_LOOKUP_COOLDOWN_MS = 5_000;
+
 /** A payment attempt belongs to one owner, one business, and one plan. */
 @Injectable()
 export class SubscriptionPaymentsService {
@@ -117,6 +121,10 @@ export class SubscriptionPaymentsService {
     }
 
     const provider = dto.paymentProvider;
+    const firstCheckDelay =
+      provider === PaymentProvider.ESEWA
+        ? ESEWA_FIRST_CHECK_MS
+        : KHALTI_FIRST_CHECK_MS;
     const gateway = this.gateways.resolve(provider);
     if (!gateway.supportsCurrency('NPR')) {
       throw new BadRequestException('This provider does not support NPR');
@@ -164,8 +172,9 @@ export class SubscriptionPaymentsService {
             status: TransactionStatus.INITIATING,
             providerTransactionId: null,
             checkoutUrl: null,
+            checkoutFormFields: null,
             subscriptionId: null,
-            nextCheckAt: new Date(Date.now() + 2 * 60_000),
+            nextCheckAt: new Date(Date.now() + firstCheckDelay),
             lastCheckedAt: null,
             checkAttempts: 0,
           }),
@@ -233,8 +242,10 @@ export class SubscriptionPaymentsService {
         status: TransactionStatus.PENDING,
         providerTransactionId: checkout.transactionId,
         checkoutUrl: checkout.redirectUrl,
+        checkoutFormFields: checkout.formFields ?? null,
         gatewayPayload: checkout.rawResponse,
-        nextCheckAt: new Date(Date.now() + 2 * 60_000),
+        nextCheckAt: new Date(Date.now() + firstCheckDelay),
+        providerExpiresAt: checkout.expiresAt ?? null,
       });
       return {
         paymentId: attempt.id,
@@ -276,10 +287,19 @@ export class SubscriptionPaymentsService {
         'Another checkout for this business is unresolved',
       );
     }
+    const formFields =
+      attempt.checkoutFormFields ||
+      (attempt.gatewayPayload?.signature
+        ? (attempt.gatewayPayload as Record<string, string>)
+        : undefined);
     if (
-      attempt.status === TransactionStatus.PENDING &&
+      [TransactionStatus.PENDING, TransactionStatus.NEEDS_REVIEW].includes(
+        attempt.status,
+      ) &&
       attempt.providerTransactionId &&
-      attempt.checkoutUrl
+      attempt.checkoutUrl &&
+      (attempt.provider !== PaymentProvider.ESEWA || !!formFields) &&
+      (!attempt.providerExpiresAt || attempt.providerExpiresAt > new Date())
     ) {
       return {
         paymentId: attempt.id,
@@ -290,14 +310,13 @@ export class SubscriptionPaymentsService {
         method: attempt.provider === PaymentProvider.ESEWA ? 'POST' : 'GET',
         redirectUrl: attempt.checkoutUrl,
         formFields:
-          attempt.provider === PaymentProvider.ESEWA
-            ? attempt.gatewayPayload
-            : undefined,
+          attempt.provider === PaymentProvider.ESEWA ? formFields : undefined,
       };
     }
     if (
       [
         TransactionStatus.INITIATING,
+        TransactionStatus.PENDING,
         TransactionStatus.NEEDS_REVIEW,
         TransactionStatus.SUCCEEDED,
       ].includes(attempt.status)
@@ -314,6 +333,26 @@ export class SubscriptionPaymentsService {
     if (!attempt) throw new NotFoundException('Payment not found');
     if (!attempt.providerTransactionId) {
       return this.publicStatus(attempt);
+    }
+    // Claim a short lookup lease in PostgreSQL. This works across app instances
+    // and stops browser polling from flooding the payment provider.
+    const now = new Date();
+    const claim = await this.transactions
+      .createQueryBuilder()
+      .update(PaymentTransactionEntity)
+      .set({ lookupStartedAt: now })
+      .where('id = :paymentId AND owner_id = :ownerId', { paymentId, ownerId })
+      .andWhere('(lookup_started_at IS NULL OR lookup_started_at <= :cutoff)', {
+        cutoff: new Date(now.getTime() - STATUS_LOOKUP_COOLDOWN_MS),
+      })
+      .execute();
+    if (!claim.affected) {
+      const current = await this.transactions.findOneBy({
+        id: paymentId,
+        ownerId,
+      });
+      if (!current) throw new NotFoundException('Payment not found');
+      return this.publicStatus(current);
     }
     try {
       return await this.confirmReference(
@@ -363,23 +402,54 @@ export class SubscriptionPaymentsService {
     ) {
       await this.applyRefund(attempt.id, result);
     } else {
+      const esewaSessionExpired =
+        result.status === PaymentStatus.NOT_FOUND &&
+        attempt.provider === PaymentProvider.ESEWA &&
+        !!attempt.providerObservedAt &&
+        attempt.providerObservedAt.getTime() <=
+          Date.now() - ESEWA_FIRST_CHECK_MS;
       const status =
         attempt.status === TransactionStatus.SUCCEEDED ||
         attempt.status === TransactionStatus.REFUNDED ||
         attempt.status === TransactionStatus.PARTIALLY_REFUNDED
           ? attempt.status
-          : this.transactionStatus(result.status);
+          : esewaSessionExpired
+            ? TransactionStatus.FAILED
+            : this.transactionStatus(result.status);
+      const now = new Date();
+      const uncertainChecks = Math.min(attempt.checkAttempts || 0, 4);
+      const retryMinutes =
+        result.status === PaymentStatus.NOT_FOUND ||
+        result.status === PaymentStatus.UNKNOWN
+          ? Math.min(5 * 2 ** uncertainChecks, 60)
+          : 2;
       await this.transactions.update(
-        { id: attempt.id },
+        {
+          id: attempt.id,
+          // A slow PENDING/NOT_FOUND response must not overwrite a concurrent
+          // successful grant or refund that committed while lookup was running.
+          status: In([
+            TransactionStatus.INITIATING,
+            TransactionStatus.PENDING,
+            TransactionStatus.PROCESSING,
+            TransactionStatus.NEEDS_REVIEW,
+            TransactionStatus.ERROR,
+          ]),
+        },
         {
           status,
           gatewayPayload: result.rawResponse,
-          lastCheckedAt: new Date(),
+          lastCheckedAt: now,
+          ...(attempt.provider === PaymentProvider.ESEWA &&
+          result.status === PaymentStatus.PENDING &&
+          !attempt.providerObservedAt
+            ? { providerObservedAt: now }
+            : {}),
           nextCheckAt:
             status === TransactionStatus.FAILED ||
             status === TransactionStatus.CANCELLED
               ? null
-              : new Date(Date.now() + 2 * 60_000),
+              : new Date(now.getTime() + retryMinutes * 60_000),
         },
       );
     }
@@ -646,6 +716,7 @@ export class SubscriptionPaymentsService {
       case PaymentStatus.PARTIALLY_REFUNDED:
         return TransactionStatus.PARTIALLY_REFUNDED;
       case PaymentStatus.UNKNOWN:
+      case PaymentStatus.NOT_FOUND:
         return TransactionStatus.NEEDS_REVIEW;
       default:
         return TransactionStatus.PENDING;

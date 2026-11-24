@@ -5,6 +5,7 @@ export enum PaymentStatus {
   CANCELLED = 'CANCELLED',
   REFUNDED = 'REFUNDED',
   PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
+  NOT_FOUND = 'NOT_FOUND',
   UNKNOWN = 'UNKNOWN',
 }
 export interface PaymentResponse {
@@ -17,4 +18,5 @@ export interface PaymentResponse {
   nextAction?: 'REDIRECT' | 'POLL' | 'WEBHOOK';
   redirectUrl?: string;
   formFields?: Record<string, string>;
+  expiresAt?: Date;
 }

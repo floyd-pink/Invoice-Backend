@@ -67,6 +67,7 @@ describe('payment gateway adapters', () => {
         json: async () => ({
           pidx: 'pidx-1',
           payment_url: 'https://pay.example.com',
+          expires_at: '2026-11-25T12:00:00+05:45',
         }),
       } as Response)
       .mockResolvedValueOnce({
@@ -84,6 +85,7 @@ describe('payment gateway adapters', () => {
     );
     expect(sent.amount).toBe(100000);
     expect(checkout.transactionId).toBe('pidx-1');
+    expect(checkout.expiresAt).toEqual(new Date('2026-11-25T12:00:00+05:45'));
 
     const verified = await gateway.verifyPayment('pidx-1', 1000);
     expect(verified).toMatchObject({
@@ -150,5 +152,25 @@ describe('payment gateway adapters', () => {
     } as Response);
     const result = await gateway.verifyPayment('SUB-order-1', 1000);
     expect(result.status).toBe(PaymentStatus.UNKNOWN);
+  });
+
+  it('preserves eSewa NOT_FOUND separately from a final failure', async () => {
+    const gateway = new EsewaGateway({
+      get: (key: string) =>
+        key === 'ESEWA_PRODUCT_CODE' ? 'EPAYTEST' : undefined,
+    } as never);
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        transaction_uuid: 'SUB-order-1',
+        product_code: 'EPAYTEST',
+        total_amount: 1000,
+        status: 'NOT_FOUND',
+      }),
+    } as Response);
+
+    const result = await gateway.verifyPayment('SUB-order-1', 1000);
+
+    expect(result.status).toBe(PaymentStatus.NOT_FOUND);
   });
 });

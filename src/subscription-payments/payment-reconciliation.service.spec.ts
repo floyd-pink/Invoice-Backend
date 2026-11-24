@@ -51,6 +51,32 @@ describe('PaymentReconciliationService', () => {
     );
   });
 
+  it('continues checking other payments when one claimed row fails', async () => {
+    dataSource.query.mockResolvedValue([
+      [
+        { id: 'payment-broken', check_attempts: 1 },
+        { id: 'payment-healthy', check_attempts: 1 },
+      ],
+      2,
+    ]);
+    payments.findOneBy.mockImplementation(async ({ id }) => {
+      if (id === 'payment-broken') throw new Error('Temporary database error');
+      return {
+        id,
+        provider: PaymentProvider.KHALTI,
+        providerTransactionId: 'healthy-pidx',
+        status: TransactionStatus.PENDING,
+      };
+    });
+
+    await worker.runOnce();
+
+    expect(subscriptions.confirmReference).toHaveBeenCalledWith(
+      PaymentProvider.KHALTI,
+      'healthy-pidx',
+    );
+  });
+
   it('does not blindly create a second Khalti checkout without pidx', async () => {
     payments.findOneBy.mockResolvedValue({
       id: 'payment-1',

@@ -36,8 +36,17 @@ describe('SubscriptionPaymentsService', () => {
     create: jest.fn((value) => value),
     save: jest.fn(),
     findOne: jest.fn(),
+    findOneBy: jest.fn(),
     findOneByOrFail: jest.fn(),
     update: jest.fn(),
+    createQueryBuilder: jest.fn(),
+  };
+  const lookupClaim = {
+    update: jest.fn().mockReturnThis(),
+    set: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    execute: jest.fn().mockResolvedValue({ affected: 1 }),
   };
   const businesses = { findOne: jest.fn() };
   const plans = { findOne: jest.fn() };
@@ -69,6 +78,8 @@ describe('SubscriptionPaymentsService', () => {
       id: 'payment-1',
     }));
     transactions.findOne.mockResolvedValue(null);
+    transactions.createQueryBuilder.mockReturnValue(lookupClaim);
+    lookupClaim.execute.mockResolvedValue({ affected: 1 });
     gateway.createPayment.mockResolvedValue({
       status: PaymentStatus.PENDING,
       transactionId: 'provider-ref',
@@ -130,6 +141,26 @@ describe('SubscriptionPaymentsService', () => {
     });
   });
 
+  it('schedules eSewa recovery later without slowing the checkout response', async () => {
+    const startedAt = Date.now();
+
+    const response = await service.startCheckout(7, {
+      requestId: '8b1a9898-fc43-4c19-90c0-cd4349bf4acf',
+      businessId: 'business-1',
+      planId: 2,
+      paymentProvider: PaymentProvider.ESEWA,
+    });
+
+    const saved = transactions.update.mock.calls[0][1];
+    expect(saved.nextCheckAt.getTime()).toBeGreaterThanOrEqual(
+      startedAt + 5 * 60_000,
+    );
+    expect(response).toMatchObject({
+      paymentId: 'payment-1',
+      method: 'POST',
+    });
+  });
+
   it('reuses the same checkout for a retried request ID', async () => {
     transactions.findOne.mockResolvedValue({
       id: 'payment-1',
@@ -158,6 +189,69 @@ describe('SubscriptionPaymentsService', () => {
     });
     expect(transactions.save).not.toHaveBeenCalled();
     expect(gateway.createPayment).not.toHaveBeenCalled();
+  });
+
+  it('keeps the eSewa signed form reusable after an uncertain provider lookup', async () => {
+    const signedForm = {
+      transaction_uuid: 'SUB-payment-1',
+      signature: 'signed-form',
+    };
+    transactions.findOne.mockResolvedValue({
+      id: 'payment-1',
+      businessId: 'business-1',
+      ownerId: 7,
+      requestId: '8b1a9898-fc43-4c19-90c0-cd4349bf4acf',
+      planId: 2,
+      provider: PaymentProvider.ESEWA,
+      amount: '1000.00',
+      currency: 'NPR',
+      status: TransactionStatus.NEEDS_REVIEW,
+      providerTransactionId: 'SUB-payment-1',
+      checkoutUrl: 'https://gateway.example/form',
+      checkoutFormFields: signedForm,
+      gatewayPayload: { status: 'NOT_FOUND' },
+    });
+
+    const response = await service.startCheckout(7, {
+      requestId: '8b1a9898-fc43-4c19-90c0-cd4349bf4acf',
+      businessId: 'business-1',
+      planId: 2,
+      paymentProvider: PaymentProvider.ESEWA,
+    });
+
+    expect(response).toMatchObject({
+      paymentId: 'payment-1',
+      method: 'POST',
+      formFields: signedForm,
+    });
+    expect(gateway.createPayment).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a Khalti link after its recorded expiry', async () => {
+    transactions.findOne.mockResolvedValue({
+      id: 'payment-1',
+      businessId: 'business-1',
+      ownerId: 7,
+      requestId: '8b1a9898-fc43-4c19-90c0-cd4349bf4acf',
+      planId: 2,
+      provider: PaymentProvider.KHALTI,
+      status: TransactionStatus.PENDING,
+      providerTransactionId: 'pidx-1',
+      checkoutUrl: 'https://gateway.example/pay',
+      providerExpiresAt: new Date('2020-01-01'),
+    });
+
+    const response = await service.startCheckout(7, {
+      requestId: '8b1a9898-fc43-4c19-90c0-cd4349bf4acf',
+      businessId: 'business-1',
+      planId: 2,
+      paymentProvider: PaymentProvider.KHALTI,
+    });
+
+    expect(response).toEqual({
+      paymentId: 'payment-1',
+      status: TransactionStatus.PENDING,
+    });
   });
 
   it('reuses an unresolved checkout even when a retry has a new request ID', async () => {
@@ -207,10 +301,136 @@ describe('SubscriptionPaymentsService', () => {
     });
     await service.confirmReference(PaymentProvider.ESEWA, 'provider-ref');
     expect(transactions.update).toHaveBeenCalledWith(
-      { id: 'payment-1' },
+      expect.objectContaining({ id: 'payment-1' }),
       expect.objectContaining({ status: TransactionStatus.NEEDS_REVIEW }),
     );
     expect(dataSource.transaction).not.toHaveBeenCalled();
+    const criteria = transactions.update.mock.calls[0][0];
+    expect(criteria.status.value).not.toContain(TransactionStatus.SUCCEEDED);
+  });
+
+  it('keeps an early eSewa NOT_FOUND recoverable even through the status endpoint', async () => {
+    const payment = {
+      id: 'payment-1',
+      provider: PaymentProvider.ESEWA,
+      providerTransactionId: 'provider-ref',
+      amount: '1000.00',
+      currency: 'NPR',
+      status: TransactionStatus.PENDING,
+      providerObservedAt: null,
+      checkAttempts: 0,
+    };
+    transactions.findOne.mockResolvedValue(payment);
+    transactions.findOneByOrFail.mockResolvedValue({
+      ...payment,
+      status: TransactionStatus.NEEDS_REVIEW,
+    });
+    gateway.verifyPayment.mockResolvedValue({
+      status: PaymentStatus.NOT_FOUND,
+      transactionId: 'provider-ref',
+      amount: 1000,
+      currency: 'NPR',
+    });
+
+    const result = await service.getPaymentStatus(7, 'payment-1');
+
+    expect(result.status).toBe(TransactionStatus.NEEDS_REVIEW);
+    expect(transactions.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'payment-1' }),
+      expect.objectContaining({
+        status: TransactionStatus.NEEDS_REVIEW,
+        nextCheckAt: expect.any(Date),
+      }),
+    );
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('treats eSewa NOT_FOUND as expired only after seeing a provider session', async () => {
+    const payment = {
+      id: 'payment-1',
+      provider: PaymentProvider.ESEWA,
+      providerTransactionId: 'provider-ref',
+      amount: '1000.00',
+      currency: 'NPR',
+      status: TransactionStatus.PENDING,
+      providerObservedAt: new Date(Date.now() - 6 * 60_000),
+      checkAttempts: 1,
+    };
+    transactions.findOne.mockResolvedValue(payment);
+    transactions.findOneByOrFail.mockResolvedValue({
+      ...payment,
+      status: TransactionStatus.FAILED,
+    });
+    gateway.verifyPayment.mockResolvedValue({
+      status: PaymentStatus.NOT_FOUND,
+      transactionId: 'provider-ref',
+      amount: 1000,
+      currency: 'NPR',
+    });
+
+    await service.confirmReference(PaymentProvider.ESEWA, 'provider-ref');
+
+    expect(transactions.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'payment-1' }),
+      expect.objectContaining({
+        status: TransactionStatus.FAILED,
+        nextCheckAt: null,
+      }),
+    );
+  });
+
+  it('records when eSewa first reports a pending provider session', async () => {
+    const payment = {
+      id: 'payment-1',
+      provider: PaymentProvider.ESEWA,
+      providerTransactionId: 'provider-ref',
+      amount: '1000.00',
+      currency: 'NPR',
+      status: TransactionStatus.NEEDS_REVIEW,
+      providerObservedAt: null,
+      checkAttempts: 0,
+    };
+    transactions.findOne.mockResolvedValue(payment);
+    transactions.findOneByOrFail.mockResolvedValue({
+      ...payment,
+      status: TransactionStatus.PENDING,
+    });
+    gateway.verifyPayment.mockResolvedValue({
+      status: PaymentStatus.PENDING,
+      transactionId: 'provider-ref',
+      amount: 1000,
+      currency: 'NPR',
+    });
+
+    await service.confirmReference(PaymentProvider.ESEWA, 'provider-ref');
+
+    expect(transactions.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'payment-1' }),
+      expect.objectContaining({
+        status: TransactionStatus.PENDING,
+        providerObservedAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it('shares one recent status lookup across repeated browser polls', async () => {
+    const payment = {
+      id: 'payment-1',
+      provider: PaymentProvider.KHALTI,
+      providerTransactionId: 'provider-ref',
+      status: TransactionStatus.PENDING,
+    };
+    transactions.findOne.mockResolvedValue(payment);
+    transactions.findOneBy.mockResolvedValue(payment);
+    lookupClaim.execute.mockResolvedValue({ affected: 0 });
+
+    const result = await service.getPaymentStatus(7, 'payment-1');
+
+    expect(result).toEqual({
+      paymentId: 'payment-1',
+      status: TransactionStatus.PENDING,
+    });
+    expect(gateway.verifyPayment).not.toHaveBeenCalled();
   });
 
   it('rejects a successful provider response with the wrong amount', async () => {

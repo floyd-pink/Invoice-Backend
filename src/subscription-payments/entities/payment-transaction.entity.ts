@@ -88,6 +88,9 @@ export class PaymentTransactionEntity {
   @Column({ name: 'checkout_url', type: 'text', nullable: true })
   checkoutUrl: string | null;
 
+  @Column({ name: 'checkout_form_fields', type: 'jsonb', nullable: true })
+  checkoutFormFields: Record<string, string> | null;
+
   @Column({ name: 'gateway_payload', type: 'jsonb', nullable: true })
   gatewayPayload?: Record<string, any>;
 
@@ -102,6 +105,19 @@ export class PaymentTransactionEntity {
 
   @Column({ name: 'last_checked_at', type: 'timestamp', nullable: true })
   lastCheckedAt: Date | null;
+
+  // A short database-backed lease prevents many status polls from calling the
+  // provider at the same time, including across multiple application instances.
+  @Column({ name: 'lookup_started_at', type: 'timestamp', nullable: true })
+  lookupStartedAt: Date | null;
+
+  // eSewa PENDING proves the signed form reached the provider. An earlier
+  // NOT_FOUND does not prove that an unsubmitted form can never be paid.
+  @Column({ name: 'provider_observed_at', type: 'timestamp', nullable: true })
+  providerObservedAt: Date | null;
+
+  @Column({ name: 'provider_expires_at', type: 'timestamp', nullable: true })
+  providerExpiresAt: Date | null;
 
   @Column({ name: 'check_attempts', type: 'int', default: 0 })
   checkAttempts: number;

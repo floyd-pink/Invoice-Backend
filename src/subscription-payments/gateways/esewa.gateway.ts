@@ -217,7 +217,9 @@ export class EsewaGateway extends BasePaymentGateway {
       COMPLETE: PaymentStatus.SUCCEEDED,
       PENDING: PaymentStatus.PENDING,
       CANCELED: PaymentStatus.CANCELLED,
-      NOT_FOUND: PaymentStatus.FAILED,
+      // The form may not have reached eSewa yet. The service decides whether
+      // this is an expired provider session or an attempt to check too early.
+      NOT_FOUND: PaymentStatus.NOT_FOUND,
       FULL_REFUND: PaymentStatus.REFUNDED,
       PARTIAL_REFUND: PaymentStatus.PARTIALLY_REFUNDED,
       AMBIGUOUS: PaymentStatus.UNKNOWN,

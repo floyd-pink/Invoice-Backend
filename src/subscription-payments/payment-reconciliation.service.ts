@@ -26,6 +26,7 @@ import { PaymentConfigurationValidator } from './payment-configuration.validator
 export class PaymentReconciliationService
   implements OnModuleInit, OnModuleDestroy
 {
+  private readonly lookupConcurrency = 4;
   private readonly logger = new Logger(PaymentReconciliationService.name);
   private timer?: NodeJS.Timeout;
   private running = false;
@@ -42,6 +43,9 @@ export class PaymentReconciliationService
     this.paymentConfig.validate();
     await this.dataSource.query(
       'SELECT next_check_at, grant_starts_at, grant_ends_at FROM payment_transactions LIMIT 0',
+    );
+    await this.dataSource.query(
+      'SELECT lookup_started_at, provider_observed_at, provider_expires_at, checkout_form_fields FROM payment_transactions LIMIT 0',
     );
     await this.dataSource.query(
       'SELECT free_business_created FROM users LIMIT 0',
@@ -97,8 +101,26 @@ export class PaymentReconciliationService
         FROM due WHERE p.id = due.id
         RETURNING p.id, p.check_attempts
         `);
-      for (const item of due)
-        await this.reconcile(item.id, item.check_attempts);
+      // A few lookups can run together without flooding either provider. One
+      // failed row cannot prevent the other claimed payments from being checked.
+      for (
+        let offset = 0;
+        offset < due.length;
+        offset += this.lookupConcurrency
+      ) {
+        const batch = due.slice(offset, offset + this.lookupConcurrency);
+        const results = await Promise.allSettled(
+          batch.map((item) => this.reconcile(item.id, item.check_attempts)),
+        );
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            this.logger.error(
+              'A claimed payment could not be reconciled',
+              result.reason instanceof Error ? result.reason.stack : undefined,
+            );
+          }
+        }
+      }
       await this.expireSubscriptions();
     } catch (error) {
       this.logger.error(

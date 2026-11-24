@@ -113,6 +113,12 @@ export class KhaltiGateway extends BasePaymentGateway {
       throw new BadGatewayException('Khalti returned an insecure payment URL');
     }
 
+    const expiry = data.expires_at;
+    const expiresAt = typeof expiry === 'string' ? new Date(expiry) : undefined;
+    if (expiresAt && Number.isNaN(expiresAt.getTime())) {
+      throw new BadGatewayException('Khalti returned an invalid expiry time');
+    }
+
     return {
       status: PaymentStatus.PENDING,
       transactionId: data.pidx, // Khalti uses pidx as the main reference
@@ -122,6 +128,7 @@ export class KhaltiGateway extends BasePaymentGateway {
       nextAction: 'REDIRECT',
       redirectUrl: data.payment_url,
       rawResponse: data,
+      expiresAt,
     };
   }
 
