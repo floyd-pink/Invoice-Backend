@@ -31,6 +31,7 @@ const correctMockServiceResponse: CreateBusinessResponse = {
   } as UserEntity,
 
   panNumber: '1233456789',
+  requiresPayment: false,
 
   subscription: {
     subscriptionId: 1,

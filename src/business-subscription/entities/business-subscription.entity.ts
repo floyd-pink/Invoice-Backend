@@ -21,6 +21,10 @@ export enum SubscriptionStatus {
 
 @Entity('business_subscription')
 @Index('IDX_SUBSCRIBTION_BUSINESS_STATUS', ['businessId', 'status'])
+@Index('UQ_ACTIVE_BUSINESS_SUBSCRIPTION', ['businessId'], {
+  unique: true,
+  where: `"status" = 'ACTIVE'`,
+})
 export class BusinessSubscriptionEntity {
   @PrimaryGeneratedColumn()
   subscriptionId: number;

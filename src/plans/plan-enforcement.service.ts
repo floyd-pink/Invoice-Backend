@@ -1,4 +1,3 @@
-import { RedisService } from 'src/common/redis/redis.service';
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThanOrEqual, Repository } from 'typeorm';
@@ -28,54 +27,30 @@ export class PlanEnforcementService {
 
     @InjectRepository(QuickSalesEntity)
     private readonly quickSalesRepository: Repository<QuickSalesEntity>,
-    private readonly redisService: RedisService,
   ) {}
 
   async checkPlanLimit(
     businessId: string,
     feature: PlanFeature,
   ): Promise<void> {
-    // 1. Trying  Redis first
-    let planData = await this.redisService.getCachedSubscription(businessId);
-    // Entries written before expiresAt was cached must be reloaded from the database.
-    if (planData && !('expiresAt' in planData)) {
-      planData = undefined;
+    // Entitlement is money-related. Read the committed database state so a stale
+    // cache or Redis outage cannot hide a paid upgrade or retain refunded access.
+    const subscription = await this.subscriptionRepository.findOne({
+      where: { businessId, status: SubscriptionStatus.ACTIVE },
+      relations: { plan: { features: true } },
+    });
+    if (!subscription || !subscription.plan) {
+      throw new ForbiddenException('No active subscription plan found.');
     }
-
-    // 2. Cache miss -> fetch from database
-    if (!planData) {
-      const subscription = await this.subscriptionRepository.findOne({
-        where: {
-          businessId,
-          status: SubscriptionStatus.ACTIVE,
-        },
-        relations: {
-          plan: {
-            features: true,
-          },
-        },
-      });
-
-      // No active subscription
-      if (!subscription || !subscription.plan) {
-        throw new ForbiddenException('No active subscription plan found.');
-      }
-      //format to store in redis
-      planData = {
-        planId: subscription.planId,
-        planType: subscription.plan.type,
-        expiresAt: subscription.endsAt,
-        features: subscription.plan.features.map((f) => ({
-          feature: f.feature,
-          limit: f.limit,
-          limitPeriod: f.limitPeriod,
-          isEnabled: f.isEnabled,
-        })),
-      };
-
-      // Save to Redis
-      await this.redisService.setCachedSubscription(businessId, planData);
-    }
+    const planData = {
+      expiresAt: subscription.endsAt,
+      features: subscription.plan.features.map((f) => ({
+        feature: f.feature,
+        limit: f.limit,
+        limitPeriod: f.limitPeriod,
+        isEnabled: f.isEnabled,
+      })),
+    };
 
     const now = new Date();
     if (planData.expiresAt && new Date(planData.expiresAt) <= now) {

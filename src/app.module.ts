@@ -23,6 +23,8 @@ import { QuickSalesModule } from './quick-sales/quick-sales.module';
 
 import { BusinessContextGuard } from './common/guards/business-context.guard';
 import { SalesReportModule } from './sales-report/sales-report.module';
+import { SubscriptionPaymentsModule } from './subscription-payments/subscription-payments.module';
+import { secureDatabaseUrl } from './database/secure-database-url';
 
 @Module({
   imports: [
@@ -35,10 +37,10 @@ import { SalesReportModule } from './sales-report/sales-report.module';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         type: 'postgres',
-        url: configService.get<string>('DATABASE_URL'),
+        url: secureDatabaseUrl(configService.get<string>('DATABASE_URL')),
         autoLoadEntities: true,
         ssl: {
-          rejectUnauthorized: false,
+          rejectUnauthorized: true,
         },
         extra: {
           max: 10,
@@ -47,7 +49,9 @@ import { SalesReportModule } from './sales-report/sales-report.module';
           retryDelay: 5000,
           options: '-c timezone=UTC',
         },
-        synchronize: true,
+        synchronize:
+          configService.get<string>('NODE_ENV') !== 'production' &&
+          configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
       }),
     }),
     ContactModule,
@@ -60,6 +64,7 @@ import { SalesReportModule } from './sales-report/sales-report.module';
     PlansModule,
     GuardsModule,
     BusinessSubscriptionModule,
+    SubscriptionPaymentsModule,
     RedisModule,
     QuickSalesModule,
     SalesReportModule,

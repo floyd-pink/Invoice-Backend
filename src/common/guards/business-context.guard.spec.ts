@@ -1,7 +1,6 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { BusinessService } from 'src/bussiness/bussiness.service';
-import { RedisService } from '../redis/redis.service';
 import { BusinessContextGuard } from './business-context.guard';
 
 describe('BusinessContextGuard', () => {
@@ -9,7 +8,6 @@ describe('BusinessContextGuard', () => {
   let guard: BusinessContextGuard;
   let reflector: { getAllAndOverride: jest.Mock };
   let businessService: { isMember: jest.Mock };
-  let redisService: { get: jest.Mock; set: jest.Mock };
 
   function context(user?: { sub: number; businessId?: string }) {
     const request: { user?: typeof user; businessId?: string } = { user };
@@ -24,14 +22,9 @@ describe('BusinessContextGuard', () => {
   beforeEach(() => {
     reflector = { getAllAndOverride: jest.fn().mockReturnValue(false) };
     businessService = { isMember: jest.fn().mockResolvedValue(true) };
-    redisService = {
-      get: jest.fn().mockResolvedValue(undefined),
-      set: jest.fn().mockResolvedValue(undefined),
-    };
     guard = new BusinessContextGuard(
       reflector as unknown as Reflector,
       businessService as unknown as BusinessService,
-      redisService as unknown as RedisService,
     );
   });
 
@@ -51,7 +44,7 @@ describe('BusinessContextGuard', () => {
     );
   });
 
-  it('checks ownership and attaches the business on a cache miss', async () => {
+  it('checks ownership and attaches the business', async () => {
     const { request, executionContext } = context({ sub: 1, businessId });
 
     await expect(guard.canActivate(executionContext)).resolves.toBe(true);
@@ -59,13 +52,13 @@ describe('BusinessContextGuard', () => {
     expect(request.businessId).toBe(businessId);
   });
 
-  it('checks ownership when the cache read fails', async () => {
-    redisService.get.mockRejectedValue(new Error('Cache unavailable'));
-    const { request, executionContext } = context({ sub: 1, businessId });
-
+  it('checks ownership again after access is revoked', async () => {
+    const { executionContext } = context({ sub: 1, businessId });
     await expect(guard.canActivate(executionContext)).resolves.toBe(true);
-    expect(businessService.isMember).toHaveBeenCalledWith(businessId, 1);
-    expect(request.businessId).toBe(businessId);
+    businessService.isMember.mockResolvedValue(false);
+    await expect(guard.canActivate(executionContext)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 
   it('rejects a selected business that the user does not own', async () => {
